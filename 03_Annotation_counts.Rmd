@@ -1,0 +1,98 @@
+---
+title: "Annotation_counts"
+author: "Natalia Andrade Rodriguez"
+date: "2023-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Script to integrate read count to annotation information from long read genome
+```{r, libraries and wdr}
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(seqinr)
+```
+
+## Loading data
+
+- Count data
+```{r, loading data}
+# Genome annotation generally has multiple rows per geneID  since one geneID may be composed of multiple transcripts 
+count_data<- readRDS("data/countData_all_163.rds")
+
+count_data$GeneID<- row.names(count_data) #35821
+```
+
+- Orbicella_faveolata genome annotation
+```{r, loading data}
+
+anno<- read_delim("data/ofav_genome/Orbicella_faveolata_gen_17.annotations.txt") %>% dplyr::rename(Goterms = "GO Terms")
+```
+## Creating column only with GO terms from annotation file
+
+```{r}
+
+anno<- as.data.frame(anno)
+
+for_goterms<- anno %>% select(TranscriptID, GeneID, Goterms)
+go_terms <- str_extract_all(anno$Goterms, "GO:\\d+")
+
+# Create a new column with GO terms separated by ";"
+anno$GO_terms <- sapply(go_terms, paste, collapse = ";")
+```
+
+## Adding Kegg IDs
+```{r, annotating counts}
+
+keeg_blastKOALA<- read_csv("data/ofav_genome/blastKoala_protein.csv")
+keeg_blastKOALA<- as.data.frame(keeg_blastKOALA)
+
+anno_blastKOALA<- anno %>% left_join(keeg_blastKOALA, by="TranscriptID")
+```
+
+
+- Scoring annotations
+```{r, loading data}
+#Scoring was done for choosing one transcript_id with most information
+
+ann_scores <- apply(anno_blastKOALA,1,function(row){
+  sum(!is.na(row) )
+})
+
+anno_scored <- cbind(anno_blastKOALA,ann_scores)
+
+# Now we pick the row with the top score.  If there are multiple rows with the same score just pick one at random
+
+anno_geneID <- anno_scored %>% group_by(GeneID) %>% top_n(n=1,wt=ann_scores) %>% sample_n(1)
+names(anno)
+
+```
+
+- Annotate counts
+```{r, annotating counts}
+count_data_anno <- count_data %>% left_join(anno_geneID,by="GeneID")
+
+count_data_anno<- count_data_anno %>% mutate(ofav_gene = GeneID )
+```
+
+
+
+
+```{r, annotating counts}
+saveRDS(count_data_anno,file = "cache/count_data_35821_anno.rda")
+```
+
+
+```{r, annotating counts}
+
+names(count_data_anno)
+gene_with_anno<- count_data_anno %>% filter(!is.na(InterPro)) #21365
+gene_with_GO<- count_data_anno %>% filter(!is.na(Goterms)) #12044
+gene_with_Kegg<- count_data_anno %>% filter(!is.na(KO))#9136
+
+```
+

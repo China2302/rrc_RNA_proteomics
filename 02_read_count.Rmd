@@ -1,0 +1,393 @@
+---
+title: "01_read_counts"
+author: "Natalia Andrade Rodriguez"
+date: "2023-09-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Mergin read count per sample obtained with STAR 
+
+##Loading/installing libraries
+```{r}
+library(data.table)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(tidyverse)
+
+```
+
+## Chosing samples to be use
+### Use file from multiqc (eliminate _trimmed in txt editor to obtain only sample name)
+```{r}
+reads_mapped<- read.delim("raw_data/STAR_long_multiqc_general_stats.txt", sep = "\t")
+head(reads_mapped)
+```
+
+```{r}
+reads_mapped<- reads_mapped %>% 
+           
+               dplyr::rename(percent_uniq = STAR_mqc.generalstats.star.uniquely_mapped_percent) %>%
+  
+               dplyr::rename(million_uniq = STAR_mqc.generalstats.star.uniquely_mapped) %>% 
+  
+               dplyr::rename(Sample_ID = Sample)
+
+samples_selected_4M<- reads_mapped %>% filter(million_uniq >= 4000000  & million_uniq < 10000000) 
+samples_selected_4M<- samples_selected_4M %>% filter(percent_uniq >= 55 & percent_uniq <= 80) #163 samples
+
+```
+
+### Plotting read counts 
+```{r}
+ggplot(reads_mapped, aes(million_uniq)) + geom_histogram()
+ggplot(reads_mapped, aes(percent_uniq)) + geom_histogram()
+
+ggplot(samples_selected_4M, aes(million_uniq)) + geom_histogram()
+ggplot(samples_selected_4M, aes(percent_uniq)) + geom_histogram()
+
+```
+
+```{r}
+sample_metadata<- read.csv("data/meta_NOVA_lab.csv") %>% select(-X)
+
+names(sample_metadata)
+```
+
+```{r}
+sample_metadata_reads<- sample_metadata %>% left_join(samples_selected_4M, by="Sample_ID")
+
+```
+
+- Creating columns per sample period and location
+```{r}
+samples_selected_4M<- sample_metadata_reads %>% 
+  
+                      filter(!is.na(million_uniq))  %>% 
+  
+                      filter(Spp != 'Ofra') %>% 
+  
+                      mutate(SP1 = case_when(sample_period == 'SP1' ~ TRUE)) %>% 
+  
+                      mutate(SP2 = case_when(sample_period == 'SP2' ~ TRUE)) %>% 
+  
+                      mutate(SP3 = case_when(sample_period == 'SP3' ~ TRUE)) %>% 
+                      
+                      mutate(Sand = case_when(Location == 'Sand' ~ TRUE)) %>% 
+  
+                      mutate(Looe = case_when(Location == 'Looe' ~ TRUE)) %>% 
+  
+                      mutate(North = case_when(Location == 'N' ~ TRUE)) %>% 
+  
+                      mutate(Middle = case_when(Location == 'M' ~ TRUE)) %>%                       
+  
+                      mutate(South = case_when(Location == 'S' ~ TRUE)) %>% 
+  
+                      mutate(Lower_Keys = case_when(Region == 'Lower' ~ TRUE)) %>% 
+
+                      mutate(ECA = case_when(Region == 'ECA' ~ TRUE)) %>% 
+  
+                      mutate(uniqsample = 1)
+  
+samples_selected_4M$sample_period<- as.character(samples_selected_4M$sample_period)
+samples_selected_4M$RNA_Dilution_concentration<- as.character(samples_selected_4M$RNA_Dilution_concentration)
+  
+
+n_colonies_4M<- unique(samples_selected_4M$ID) #83
+```
+
+```{r}
+write.csv(samples_selected_4M, "data/samples_selected_4M.csv")
+```
+
+
+## Sorting data per location
+- Data set with samples of colonies from which we have data for Lower Keys, Sand Keys
+```{r}
+Sand<- samples_selected_4M %>%                             #17 samples/unique colonies
+   
+          filter(Sand == TRUE)
+  
+n_colonies_Sand<- unique(Sand$ID)
+```
+
+```{r}
+ # write.csv(Sand, "data/sample_data_Sand.csv")
+```
+
+- Data set with samples of colonies from which we have data for Lower Keys, Looe Keys
+```{r}
+Looe<- samples_selected_4M %>%                             #23 samples/unique colonies
+   
+          filter(Looe == TRUE)
+  
+n_colonies_Looe<- unique(Looe$ID)
+```
+
+```{r}
+# write.csv(Looe, "data/sample_data_Looe.csv")
+```
+
+- Data set with samples of colonies from which we have data for Coral ECA, North
+```{r}
+North<- samples_selected_4M %>%                             #14 samples/unique colonies
+   
+          filter(North == TRUE)
+  
+n_colonies_North<- unique(North$ID)
+```
+
+```{r}
+# write.csv(North, "data/sample_data_North.csv")
+```
+
+- Data set with samples of colonies from which we have data for Coral ECA, Middle
+```{r}
+Middle<- samples_selected_4M %>%                             #16 samples/unique colonies
+   
+          filter(Middle == TRUE)
+  
+n_colonies_Middle<- unique(Middle$ID)
+```
+
+```{r}
+# write.csv(Middle, "data/sample_data_Middle.csv")
+```
+
+- Data set with samples of colonies from which we have data for Coral ECA, South
+```{r}
+South<- samples_selected_4M %>%                             #13 samples/unique colonies
+   
+          filter(South == TRUE)
+  
+n_colonies_South<- unique(South$ID)
+```
+
+```{r}
+# write.csv(South, "data/sample_data_South.csv")
+```
+
+### Region sample data
+- Data set with samples of colonies from which we have data for Coral ECA
+```{r}
+ECA<- samples_selected_4M %>%                             #43 samples/unique colonies
+   
+          filter(ECA == TRUE)
+  
+n_colonies_ECA<- unique(ECA$ID)
+```
+
+```{r}
+# write.csv(ECA, "data/sample_data_ECA.csv")
+```
+
+- Data set with samples of colonies from which we have data for Lower_Keys
+```{r}
+Lower_Keys<- samples_selected_4M %>%                             #40 samples/unique colonies
+   
+          filter(Lower_Keys == TRUE)
+  
+n_colonies_Lower_Keys<- unique(Lower_Keys$ID)
+```
+
+```{r}
+# write.csv(Lower_Keys, "data/sample_data_Lower_Keys.csv")
+```
+
+## Sorting data per sample period
+- Data set with samples of colonies from which we have data for samples period 1
+```{r}
+sp1<- samples_selected_4M %>%                             #22 samples/unique colonies
+   
+          filter(SP1 == TRUE)
+  
+n_colonies_sp1<- unique(sp1$ID)
+```
+
+```{r}
+write.csv(sp1, "data/sample_data_sp1.csv")
+```
+
+- Data set with samples of colonies from which we have data for samples period 2
+```{r}
+sp2<- samples_selected_4M %>%                             #77 samples/unique colonies
+   
+          filter(SP2 == TRUE)
+  
+n_colonies_sp2<- unique(sp2$ID)
+```
+
+```{r}
+write.csv(sp2, "data/sample_data_sp2.csv")
+```
+
+- Data set with samples of colonies from which we have data for samples period 3
+```{r}
+sp3<- samples_selected_4M %>%                             #64 samples/unique colonies
+   
+          filter(SP3 == TRUE)
+  
+n_colonies_sp3<- unique(sp3$ID)
+```
+
+```{r}
+# write.csv(sp3, "data/sample_data_sp3.csv")
+```
+
+
+## List will be use to select files of samples that have at least 3M uniquely mapped reads and a 60 to 70% of mapping rate and colonies that were collected in each Region
+
+- List of samples from colonies collected in Lower_Keys
+```{r}
+for_list_Lower_Keys<- Lower_Keys %>% select(Sample_ID)
+```
+
+
+```{r}
+write_delim(for_list_Lower_Keys, 'data/sample_list_Lower_Keys.txt')
+```
+
+- List of samples from colonies collected in ECA
+```{r}
+for_list_ECA<- ECA %>% select(Sample_ID)
+```
+
+
+```{r}
+write_delim(for_list_ECA, 'data/sample_list_ECA.txt')
+```
+
+
+
+- List of all samples 
+```{r}
+for_list_all<- samples_selected_4M %>% select(Sample_ID)
+```
+
+
+```{r}
+write_delim(for_list_all, 'data/sample_list_all.txt')
+```
+
+
+########### KEP EDITING FROM HERE WITH HARDDRIVE###########
+
+### Count data for each region and all the 4M samples 
+
+- Count data for all samples with read counts and mapping percentage characteristics met
+```{r}
+dir<- "/Volumes/NTK_NAR/SCTLD_data_NOVA-MOTE/NOVA/pegasus_longreads_data/alligned_long_polyA_modify/genecount_star/"
+
+file_all<- list.files(paste0(dir,"readcounts_all" ),
+                  "*.gzReadsPerGene.out.tab$", full.names = T)
+
+
+countData_all = data.frame(fread(file_all[1]))[c(1,3)]
+
+for(i in 2:length(file_all)) {
+        countData_all = cbind(countData_all, data.frame(fread(file_all[i]))[3])
+}
+
+# Skip first 4 lines, count data starts on the 5th line
+countData_all = countData_all[c(5:nrow(countData_all)),]
+colnames(countData_all) = c("GeneID", gsub(paste0(dir,"readcounts_all/"), "", file_all))
+colnames(countData_all) = gsub("_trimmed_trimmed.fq.gzReadsPerGene.out.tab", "", colnames(countData_all))
+rownames(countData_all) = countData_all$GeneID
+
+countData_all = countData_all[,c(2:ncol(countData_all))]
+```
+
+
+```{r}
+write_rds(countData_all, "data/countData_all_163.rds")
+```
+
+
+
+
+
+#Plotting read counts 
+
+```{r}
+ggplot(reads_mapped, aes(million_uniq)) + geom_histogram()
+
+ggplot(reads_mapped, aes(percent_uniq)) + geom_histogram()
+
+ggplot(samples_selected_4M, aes(million_uniq)) + geom_histogram()
+ggplot(samples_selected_4M, aes(percent_uniq)) + geom_histogram()
+
+```
+
+```{r}
+ggplot(samples_selected_4M, aes(Cq)) + geom_histogram()
+
+```
+
+```{r}
+ggplot(samples_selected_4M, aes(SCTLD_RNA)) + geom_bar() + geom_text(
+    aes(label = after_stat(count), y = after_stat(count) + 0.5),
+    stat = "count",
+    vjust = -0.5
+  )
+
+#+ facet_grid(  ~ sample_period)
+
+```
+
+
+
+```{r}
+ggplot(samples_selected_4M, aes(sample_period)) + geom_bar(aes(fill=sample_period), position = "dodge") + facet_wrap(~ ID )
+```
+
+
+```{r}
+forplot<- samples_selected_4M %>% group_by(sample_period, SCTLD_RNA)
+
+
+                                               
+```
+
+```{r}
+ggplot(samples_selected_4M, aes(SCTLD_RNA)) + 
+  
+  geom_bar(position = "dodge", stat = "count") + 
+  
+  geom_text(stat = "count", aes(label = after_stat(count))) +
+  
+  facet_wrap(~ Region ) 
+```
+
+
+#Visualising samples that can be analysed together based on sample periode
+```{r}
+sample_period_plot<- sample_period_data %>% mutate(SP_data = case_when(
+   
+                                            SP1_SP2 == 1 ~ 'SP1_SP2' ,
+                                            SP1_SP3 == 1 ~ 'SP1_SP3' ,
+                                            SP2_SP3 == 1 ~ "SP2_SP3" ,
+                                            SP1_SP2_SP3 == 1 ~ "SP1_SP2_SP3",
+                                            is.na(SP1_SP2) ~"SP")) %>% 
+                      left_join(samples_selected_4M, by="Sample_ID")
+
+sample_period_plot_cast<- sample_period_data_cast %>% mutate(SP_data = case_when(
+   
+                                            SP1_SP2 == 1 ~ 'SP1_SP2' ,
+                                            SP1_SP3 == 1 ~ 'SP1_SP3' ,
+                                            SP2_SP3 == 1 ~ "SP2_SP3" ,
+                                            SP1_SP2_SP3 == 1 ~ "SP1_SP2_SP3",
+                                            is.na(SP1_SP2) ~"SP"))
+
+
+ggplot(sample_period_plot, aes(SP_data)) +
+   
+      geom_bar()+ facet_grid(  ~ SCTLD)
+
+```
+

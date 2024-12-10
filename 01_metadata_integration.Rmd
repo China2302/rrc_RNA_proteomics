@@ -1,0 +1,41 @@
+---
+title: "01_data_integration"
+author: "Natalia Andrade Rodriguez"
+date: "2023-09-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(reshape2)
+```
+#Lab data 
+```{r}
+NOVA_lab<- read.csv("raw_data/NOVA_lab.csv") %>% select(-'sample_period')
+
+```
+#Metada 
+```{r}
+meta_NOVA<- read.csv("raw_data/metadata_v9_3.csv")
+```
+
+
+##### ### Integrating Metadata and Lab data ###
+```{r}
+meta_NOVA_lab<- meta_NOVA %>% 
+  
+               full_join(NOVA_lab, by="Unique_ID")
+```
+
+
+```{r}
+write.csv(meta_NOVA_lab,"data/meta_NOVA_lab.csv")
+```
+

@@ -1,0 +1,88 @@
+---
+title: "loading_packages"
+author: "Natalia Andrade Rodriguez"
+date: "2024-02-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+These are all the packages used to run all the scripts in this repository
+```{r, message=FALSE}
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install('mixOmics')
+# BiocManager::install('DESeq2')
+# BiocManager::install("timeOmics")
+# install.packages("devtools")
+# devtools::install_github("zhangyuqing/sva-devel")
+# BiocManager::install("KEGGREST")
+# BiocManager::install("pathview")
+# install.packages("viridis")
+# BiocManager::install("DEGreport")
+# install.packages("beepr")
+# install.packages("ggpubr")
+# install.packages("stringdist")
+# install.packages("heatmaply")
+# BiocManager::install("GO.db")
+# install.packages("AnnotationDbi")
+# BiocManager::install("WGCNA")
+# install.packages("impute")
+# install.packages("RSQLite")
+# BiocManager::install("BiocParallel")
+# install.packages("rgl")
+# install.packages("glmpca")
+# BiocManager::install("ComplexUpset")
+
+library(ComplexUpset)
+library(glmpca)
+library(BiocParallel)
+library(RSQLite)
+library('impute')
+library('mixOmics')
+library('DESeq2')
+library('WGCNA')
+library('ggplot2')
+library('ggrepel')
+library('corpcor')
+library('tidyr')
+library('dplyr')
+library(tidyverse)
+library(reshape2)
+library(CorLevelPlot)
+library(gridExtra)
+library(RCy3)
+library("sva")
+library(KEGGREST)
+library(tidyverse)
+library(pathview)
+library(clusterProfiler)
+library(enrichplot)
+library(DEGreport)
+library(beepr)
+library(ComplexHeatmap)
+library(RColorBrewer)
+library(circlize)
+library(plyr)
+library(ggpubr)
+library(scales)
+library(stringdist)
+library(corrplot)
+library(heatmaply)
+library(GO.db)
+library(AnnotationDbi)
+library(data.table)
+library(rrcov)
+library(rgl)
+library(future)
+library(dendextend)
+library(viridis)
+
+```
+
+```{r}
+sessionInfo()
+```
+

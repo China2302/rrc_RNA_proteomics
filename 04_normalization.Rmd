@@ -1,0 +1,1825 @@
+---
+title: "03_Normalizing_All_4M"
+author: "Natalia Andrade Rodriguez"
+date: "2023-03-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+### Packages
+```{r, message=FALSE}
+# library('DESeq2')
+# library(WGCNA)
+# library('ggplot2')
+# library('ggrepel')
+# library('corpcor')
+# library('tidyr')
+# library('dplyr')
+# library(tidyverse)
+# library(reshape2)
+# library(CorLevelPlot)
+# library(gridExtra)
+```
+## Paralllel running
+```{r}
+options(future.globals.maxSize = 15 * 1024^3)
+plan("multisession", workers = 8)
+```
+## Setting up data
+
+### Loading data
+```{r}
+# raw counts obtained with STAR
+count_data_4M_raw<- readRDS("data/countData_all_163.rds")
+
+# Sample data
+sample_data_4M<- read.csv("data/samples_selected_4M.csv")
+
+#Samples_proteomics
+samples_prot<- read.csv("data/proteomic_grp.csv")
+samples_prot<- samples_prot %>% select(-Region, -Location)
+# annotations
+anno<- readRDS("cache/count_data_35821_anno.rda") %>% mutate(ofav_gene = GeneID)
+anno<-anno[,164:193]
+
+```
+
+```{r}
+# Selection samples in sample_data
+samples_rna_prot<- sample_data_4M %>% inner_join(samples_prot,by="UniqueID")
+samples_to_keep<- samples_rna_prot$Sample_ID
+count_data_prot<-count_data_4M_raw[,samples_to_keep]  #163
+```
+
+
+### Setting up sample data
+- sample data with information about sample ID (needs to correspond to sample ID in counts file), treatment and any other variable 
+```{r} 
+
+samples_rna_prot<- samples_rna_prot %>% 
+  
+              mutate(colnames = Sample_ID) %>% 
+  
+              mutate(count_prediseased = Grouping == "pre_diseased") %>% 
+
+              mutate(count_unaffected = SCTLD_RNA == "SCTLD_unaffected") %>% 
+  
+              mutate(SCTLD_RNA_SP = paste(SCTLD_RNA, sample_period, sep = "_")) %>% 
+
+              mutate(SCTLD_RNA_SP_region = paste(SCTLD_RNA_SP, Region, sep = "_")) %>% 
+  
+              mutate(SCTLD_RNA_TP = paste(SCTLD_RNA, time_point, sep = "_")) %>% 
+  
+              mutate(SP_region = paste(sample_period, Region, sep = "_")) %>% 
+    
+              mutate(season = case_when(
+                sample_period == "SP1" ~ "summer",
+                sample_period == "SP2" ~ "fall",
+                sample_period == "SP3" ~ "winter")) %>% 
+
+              mutate(SCTLD_RNA_Location_season = paste(SCTLD_RNA_Location, season, sep = "_")) %>%
+
+              mutate(SCTLD_RNA_Region_season = paste(SCTLD_RNA_region, season, sep = "_"))
+
+
+              # arrange(order)
+
+rownames(samples_rna_prot)<- samples_rna_prot$colnames
+#head(sample_data_4M)
+#names(sample_data_4M)
+```
+
+
+### Eliminating samples collected in sample period 1
+```{r}
+sample_data_4M_nosp1<- sample_data_4M %>% filter(is.na(SP1))
+
+list_nosp1<- sample_data_4M_nosp1$Sample_ID
+
+
+count_data_noSP1<- as.data.frame(count_data_all)
+
+count_data_noSP1<- count_data_noSP1[,(colnames(count_data_noSP1) %in% list_nosp1)]
+
+count_data_noSP1<- count_data_noSP1[,(colnames(count_data_noSP1) %in% rownames(sample_data_4M_nosp1))]
+
+all(rownames(sample_data_4M_nosp1) %in% colnames(count_data_noSP1))
+all(rownames(sample_data_4M_nosp1) == colnames(count_data_noSP1))
+
+```
+
+### Eliminating samples from North ECA 
+```{r}
+# The North ECA location doesn't have any SCTLD unaffected colonies
+sample_data_4M_noNorth<- sample_data_4M_nosp1 %>% filter(is.na(North))
+
+list_noNorth<- sample_data_4M_noNorth$Sample_ID #118 samples
+
+
+count_data_noNorth<- as.data.frame(count_data_noSP1)
+
+
+count_data_noNorth<- count_data_noNorth[,(colnames(count_data_noNorth) %in% list_noNorth)]
+
+count_data_noNorth<- count_data_noNorth[,(colnames(count_data_noNorth) %in% rownames(sample_data_4M_noNorth))]
+
+all(rownames(sample_data_4M_noNorth) %in% colnames(count_data_noNorth))
+all(rownames(sample_data_4M_noNorth) == colnames(count_data_noNorth))
+```
+
+
+### Removing genes with low reads 
+```{r}
+number_prediseased <- sum(samples_rna_prot$count_prediseased == "TRUE") #26 samples
+
+# remove_low <- rowSums(count_data_all_e >= 15) >= number_SCTLD_unaffected
+remove_low <- rowSums(count_data_prot >= 20) >= number_prediseased
+
+
+count_data_prot_nolow<- count_data_prot[remove_low,] # 11090 genes  100 samples
+
+prop_zeros <- sum(count_data_prot_nolow == 0) / (nrow(count_data_prot_nolow) * ncol(count_data_prot_nolow))
+cat("Proportion of zeros:", prop_zeros, "\n") # Proportion of 5 to 30% is normal in RNAseq data
+```
+
+### PLOTS: Counts per sample
+```{r}
+
+total_counts_per_sample <- colSums(count_data_prot_nolow)
+
+# Assuming total_counts_per_sample is already computed
+df <- data.frame(
+  sample = names(total_counts_per_sample),
+  total_counts = total_counts_per_sample
+)
+```
+
+```{r}
+# Create the bar plot with ggplot2
+ggplot(df, aes(x = sample, y = total_counts)) +
+  geom_bar(stat = "identity", fill = "lightblue") +  # Create the bar plot
+  # Add labels inside each bar, vertically
+  geom_text(aes(label = sample), angle = 90, size = 3, color = "black") +  
+  labs(title = "Total Counts Per Sample", y = "Total Counts") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+```{r}
+ggplot(df, aes(x = total_counts)) +
+  geom_histogram(binwidth = 1e6, fill = "lightblue", color = "black") +
+  labs(title = "Distribution of Total Counts Per Sample", x = "Total Counts", y = "Number of Samples")
+
+ggplot(df, aes(x = total_counts)) +
+  geom_density(fill = "lightblue") +
+  geom_vline(xintercept = 2.5e6, color = "red", linetype = "dashed", size = 1) +
+  annotate(
+    "text",
+    x = log10(2.5e6),
+    y = max(density(df$total_counts)$y) * 0.9,
+    label = "Threshold = 2e6 reads",
+    angle = 90,
+    vjust = -0.5,
+    color = "red"
+  ) +
+  labs(
+    title = "Density of Total Counts Per Sample ",
+    x = "Total Counts",
+    y = "Density"
+  )
+ggplot(df, aes(x = log10(total_counts))) +
+  geom_density(fill = "lightblue") +
+  geom_vline(xintercept = log10(2.5e6), color = "red", linetype = "dashed", size = 1) +
+  annotate(
+    "text",
+    x = log10(2.5e6),
+    y = max(density(log10(df$total_counts))$y) * 0.9,
+    label = "Threshold = 2e6 reads",
+    angle = 90,
+    vjust = -0.5,
+    color = "red"
+  ) +
+  labs(
+    title = "Density of Total Counts Per Sample (Log Scale)",
+    x = "Log10(Total Counts)",
+    y = "Density"
+  )
+
+```
+
+# MAKE A GRAPH OF THE DISTRIBUTION OF TOTAL NUMBER OF COUNTS PER SAMPLES
+
+### PLOTS: Log Counts per sample
+```{r}
+# Adjust margin placement
+par(mgp = c(3, 0.5, 0))  # Reduce the distance between axis and labels
+
+# Create the boxplot
+boxplot(log10(count_data_prot_nolow + 1), 
+        main = "Log10 Counts per Gene", 
+        ylab = "Log10(Counts + 1)", 
+        las = 2,  # Rotate labels to vertical
+        cex.axis = 0.8)  # Adjust font size
+
+
+
+```
+
+
+### PLOTS: Histogram of Total Counts Per Gene
+```{r}
+total_counts_per_gene <- rowSums(count_data_prot_nolow)
+hist(total_counts_per_gene, 
+     breaks = 50, 
+     main = "Histogram of Total Counts Per Gene", 
+     xlab = "Counts", 
+     col = "lightgreen")
+```
+### Checking sample distribution of samples with low total read counts
+```{r}
+# Assuming 'total_counts_per_sample' contains the total counts for each sample
+samples.to.be.excluded.reads <- names(total_counts_per_sample[total_counts_per_sample < 2.5e6])
+
+# Print the samples
+# print(samples.to.be.excluded.reads)
+
+# Optional: create a data frame to see both sample names and their total counts
+samples.to.be.excluded.reads_df <- data.frame(
+  sample = samples.to.be.excluded.reads,
+  total_counts = total_counts_per_sample[samples.to.be.excluded.reads]
+)
+
+# Print the data frame
+# print(samples.to.be.excluded.reads_df)
+
+```
+
+```{r}
+samples.to.be.excluded.reads.meta <- samples_rna_prot  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.reads) 
+```
+
+```{r}
+
+
+ggplot(samples.to.be.excluded.reads.meta, aes(x = season, fill = Region)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution ",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Region") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+```{r}
+# Assuming 'total_counts_per_sample' contains the total counts for each sample
+samples.to.be.excluded.reads_high <- names(total_counts_per_sample[total_counts_per_sample > 4.5e6])
+
+# Print the samples
+# print(samples.to.be.excluded.reads_high)
+
+# Optional: create a data frame to see both sample names and their total counts
+samples.to.be.excluded.reads_high_df <- data.frame(
+  sample = samples.to.be.excluded.reads_high,
+  total_counts = total_counts_per_sample[samples.to.be.excluded.reads_high]
+)
+
+# Print the data frame
+# print(samples.to.be.excluded.reads_high_df)
+
+```
+
+```{r}
+samples.to.be.excluded.reads_high.meta <- sample_data_4M_noNorth  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.reads_high) 
+```
+
+```{r}
+
+
+ggplot(samples.to.be.excluded.reads_high.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Region") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+
+```{r}
+
+samples.to.be.excluded.reads <- samples.to.be.excluded.reads_df$sample
+  # c("262_N50","232_1463","208_N56")
+#,"282_695","297_LC018", "232_1463","156_LC058"
+count_data.reads <- count_data_prot_nolow[,!(colnames(count_data_prot_nolow) %in% samples.to.be.excluded.reads)] #10908,
+
+colData.reads <- samples_rna_prot  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(!row.names(.) %in% samples.to.be.excluded.reads) #98
+```
+
+```{r}
+all(rownames(colData.reads) %in% colnames(count_data.reads))
+all(rownames(colData.reads) == colnames(count_data.reads))
+```
+```{r}
+
+total_counts_per_sample.reads <- colSums(count_data.reads)
+
+
+# Assuming total_counts_per_sample is already computed
+df.reads <- data.frame(
+  sample = names(total_counts_per_sample.reads),
+  total_counts = total_counts_per_sample.reads
+)
+```
+
+```{r}
+ggplot(df.reads, aes(x = total_counts)) +
+  geom_histogram(binwidth = 1e6, fill = "lightblue", color = "black") +
+  labs(title = "Distribution of Total Counts Per Sample", x = "Total Counts", y = "Number of Samples")
+
+ggplot(df.reads, aes(x = total_counts)) +
+  geom_density(fill = "lightblue") +
+  geom_vline(xintercept = 2.5e6, color = "red", linetype = "dashed", size = 1) +
+  annotate(
+    "text",
+    x = log10(2e6),
+    y = max(density(df.reads$total_counts)$y) * 0.9,
+    label = "Threshold = 2e6 reads",
+    angle = 90,
+    vjust = -0.5,
+    color = "red"
+  ) +
+  labs(
+    title = "Density of Total Counts Per Sample, after outliers",
+    x = "Total Counts",
+    y = "Density"
+  )
+ggplot(df.reads, aes(x = log10(total_counts))) +
+  geom_density(fill = "lightblue") +
+  geom_vline(xintercept = log10(2.5e6), color = "red", linetype = "dashed", size = 1) +
+  annotate(
+    "text",
+    x = log10(2e6),
+    y = max(density(log10(df.reads$total_counts))$y) * 0.9,
+    label = "Threshold = 2e6 reads",
+    angle = 90,
+    vjust = -0.5,
+    color = "red"
+  ) +
+  labs(
+    title = "Density of Total Counts Per Sample (Log Scale)",
+    x = "Log10(Total Counts)",
+    y = "Density"
+  )
+
+```
+```{r}
+all(rownames(colData.reads) %in% colnames(count_data.reads))
+all(rownames(colData.reads) == colnames(count_data.reads))
+```
+```{r}
+rm(count_data_4M_raw,count_data_all,count_data_noNorth,count_data_noSP1)
+
+rm(sample_data_4M,sample_data_4M_nosp1)
+
+rm(samples.to.be.excluded.reads_df,samples.to.be.excluded.reads_high_df)
+```
+
+```{r}
+
+ggplot(colData.reads, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+```{r}
+
+ggplot(colData.reads, aes(x = season, fill = Grouping)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ Grouping) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Grouping") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+
+### Modelling data with DESEq2 with full model : ~ SCTLD_RNA_month
+```{r}
+dds_dist <- DESeqDataSetFromMatrix(countData = count_data.reads, 
+                                   colData = colData.reads, 
+                                   design = ~ Grouping)
+
+# if (file.exists("cache/dds_idgenes.rds")) {
+#   dds_idgenes <- read_rds("cache/dds_idgenes.rds")
+# } else {
+dds_dist <- DESeq(dds_dist, parallel = TRUE)
+#   write_rds(dds_idgenes,"cache/dds_idgenes.rds")
+# }
+
+
+rlog_dds_dist <- rlog(dds_dist, blind = FALSE)
+
+beep(6)
+```
+
+
+
+
+### PLOT: PCA DESeq2 plot with rlog transformation
+```{r}
+pcaData_outliers = plotPCA(rlog_dds_dist, intgroup=c("colnames",'SCTLD_RNA',"sample_month","Location","time_point","Region","ID","Sample_ID","season","SP_region","SCTLD_RNA_Location_season","month_location"),
+returnData=TRUE)
+# pcaData_outliers$label <- ifelse(pcaData_outliers$Sample_ID %in% outliers, 
+#                                  pcaData_outliers$Sample_ID, 
+#                                  NA)
+percentVar_outliers = round(100 * attr(pcaData_outliers, "percentVar"))
+
+# png("results/3_All_4M_Norm/PCA_dds_null.filtered2_rlog.png", width=8, height=6, units = "in", res = 300)
+suppressWarnings({ 
+  ggplot(pcaData_outliers, aes(PC1, PC2, colour = SP_region, shape = SCTLD_RNA)) +
+geom_point(size = 4) + theme_bw() +
+geom_text_repel(aes(label = Sample_ID), nudge_x = -1, nudge_y = 0.2, size = 4, max.overlaps = 100) +
+ggtitle("Principal Component Analysis ~ season, dds_outliers", subtitle = "rlog") +
+xlab(paste0("PC1: ",percentVar_outliers[1],"% variance")) +
+ylab(paste0("PC2: ",percentVar_outliers[2],"% variance")) 
+# Custom scales for finer axes
+# scale_x_continuous(breaks = seq(-80, 80, by = 5), limits = c(-30, 30)) +
+# scale_y_continuous(breaks = seq(-50, 30, by = 5), limits = c(-50, 30))
+})
+# dev.off()
+
+```
+```{r}
+pcaData_outliers$group <- pcaData_outliers$season
+
+ggplot(pcaData_outliers, aes(PC1, PC2, colour = SP_region, shape = SCTLD_RNA)) +
+  geom_point(size = 2) +
+  stat_ellipse(aes(group = SP_region), level = 0.95, type = "norm") +
+  geom_text_repel(aes(label = Sample_ID), nudge_x = -1, nudge_y = 0.2, size = 4, max.overlaps = 100) +
+  theme_bw() +
+  ggtitle("Principal Component Analysis ~ season, dds_outliers", subtitle = "rlog") +
+  xlab(paste0("PC1: ", percentVar_outliers[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar_outliers[2], "% variance"))
+```
+
+### Samples consider outliers for rlog PCA analysis
+
+```{r}
+samples.to.be.excluded.rlog <- 0
+samples.to.be.excluded.rlog.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.rlog) 
+
+ggplot(samples.to.be.excluded.rlog.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with rlog PCA",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+### PLOT: PCA DESeq2 plot with rlog transformation
+```{r}
+
+highlight_samples <- samples.to.be.excluded.rlog  # Replace with the actual sample names
+
+pcaData_idsamples = plotPCA(rlog_dds_dist, intgroup=c("colnames",'SCTLD_RNA',"sample_month","Location","time_point","Region","ID","Sample_ID","season","SP_region"),
+returnData=TRUE)
+# pcaData_idsamples$label <- ifelse(pcaData_idsamples$Sample_ID %in% outliers, 
+#                                  pcaData_idsamples$Sample_ID, 
+#                                  NA)
+pcaData_idsamples$highlight <- ifelse(pcaData_idsamples$Sample_ID %in% highlight_samples, "highlight", "normal")
+
+percentVar_idsamples = round(100 * attr(pcaData_idsamples, "percentVar"))
+
+# png("results/3_All_4M_Norm/PCA_dds_null.filtered2_rlog.png", width=8, height=6, units = "in", res = 300)
+# Create the PCA plot with highlighted samples
+# Create the PCA plot
+ggplot(pcaData_idsamples, aes(PC1, PC2, colour = SP_region, shape = SCTLD_RNA)) +
+  geom_point(aes(color = highlight), size = 4) + 
+  theme_bw() +
+  # Show labels only for highlighted samples
+  geom_text_repel(data = subset(pcaData_idsamples, highlight == "highlight"), 
+                  aes(label = Sample_ID), 
+                  nudge_x = -1, nudge_y = 0.2, size = 4, max.overlaps = 100) +
+  ggtitle("Principal Component Analysis ~ season, dds_idgenes", subtitle = "rlog") +
+  xlab(paste0("PC1: ", percentVar_idsamples[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar_idsamples[2], "% variance")) +
+  # Custom scales for finer axes
+  # scale_x_continuous(breaks = seq(-80, 80, by = 5), limits = c(-30, 80)) +
+  # scale_y_continuous(breaks = seq(-50, 30, by = 5), limits = c(-50, 30)) +
+  scale_color_manual(values = c("highlight" = "red", "normal" = "black"))  # Customize colors
+
+# dev.off()
+
+```
+
+### Detecting samples outliers based on hierarchical clustering and PCA of raw reads
+```{r}
+# detect outlier samples - hierarchical clustering-method 1
+
+expression<- t(count_data.reads)
+
+# png("results/normalization/htree_QC_nooutliers.png", width=30, height=8, units = "in", res = 300)
+
+htree_4M <- hclust(dist(expression), method = "average")
+# Create a dendrogram object from your hclust object
+dend <- as.dendrogram(htree_4M)
+
+# Define the samples to highlight: extreme sample distance
+highlight_samples.den <- c("224_663","148_MC019","192_1280","212_N48","212_699","140_LC077","216_3446","184_1463","267_713","208_713","196_1452","287_693","257_741")
+
+# Samples from clusters with in cut off lower than 6 samples
+# highlight_samples <- colData.reads %>% filter( season == "winter") %>% select(Sample_ID)
+# highlight_samples <- highlight_samples$Sample_ID
+
+# highlight_samples <- c("148_MC019","212_753","192_1280","212_N48","212_699","140_LC077" ,"216_3446" , "184_1463" , "224_663","267_713","208_713","196_1452","287_693","257_741" )
+#"148_MC019","212_753","192_1280","212_N48","212_699","140_LC077" ,"216_3446" , "184_1463" , "224_663","267_713","208_713","196_1452","287_693","257_741" 
+# Match the labels to highlight
+labels_colors(dend) <- ifelse(labels(dend) %in% highlight_samples.den, "blue", "black")
+
+# Plot the dendrogram with highlighted labels
+par(mar = c(5, 4, 2, 2))  # Adjust margins for better label placement
+plot(dend, 
+     main = "Sample clustering to after outlier detection", 
+     sub = "", 
+     xlab = "", 
+     cex.main = 2,
+     cex.lab = 1,
+     cex = 0.2)
+
+# Add a line for the cut-off
+abline(h = 150000, col = "red")
+
+
+# dev.off()
+
+
+```
+### Samples consider outliers for dendogram analysis
+
+```{r}
+samples.to.be.excluded.den <- c("224_663","148_MC019","192_1280","212_N48","212_699","140_LC077","216_3446","184_1463","267_713","208_713","196_1452","287_693","257_741")
+samples.to.be.excluded.den.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.den) 
+
+ggplot(samples.to.be.excluded.den.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with rlog PCA",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+### Running rubust PCA to find outliers samples based on the full model 
+```{r}
+rpca1 <- PcaGrid(t(assay(rlog_dds_dist)),k=3, scale =FALSE )
+
+# plot(rpca1)
+
+beep(2)
+```
+
+#### PLOT: rPCA to find outliers based on the full model 
+```{r}
+# Extract score and orthogonal distances
+score_distances1 <- rpca1@sd           # Score distances
+orthogonal_distances1 <- rpca1@od      # Orthogonal distances
+
+# Plot orthogonal distance vs. score distance
+plot(score_distances1, orthogonal_distances1,
+     xlab = "Score Distance",
+     ylab = "Orthogonal Distance",
+     main = "Orthogonal Distance vs. Score Distance",
+     pch = 19, col = "blue")
+
+# Add cutoff lines for outliers (optional)
+abline(v = rpca1@cutoff.sd, col = "red", lty = 2)  # Score distance threshold
+abline(h = rpca1@cutoff.od, col = "red", lty = 2)  # Orthogonal distance threshold
+
+legend("topright", legend = c("Outlier Thresholds"), col = "red", lty = 2)
+```
+
+```{r}
+# Extract score and orthogonal distances
+score_distances1 <- rpca1@sd           # Score distances
+orthogonal_distances1 <- rpca1@od      # Orthogonal distances
+
+# Define cutoff thresholds
+score_cutoff <- rpca1@cutoff.sd
+orthogonal_cutoff <- rpca1@cutoff.od
+
+# Identify outliers based on thresholds
+outlier_indices <- which(score_distances1 > score_cutoff | orthogonal_distances1 > orthogonal_cutoff)
+
+# Plot orthogonal distance vs. score distance
+plot(score_distances1, orthogonal_distances1,
+     xlab = "Score Distance",
+     ylab = "Orthogonal Distance",
+     main = "Orthogonal Distance vs. Score Distance",
+     pch = 19, col = "blue")
+
+# Highlight outliers in red
+points(score_distances1[outlier_indices], orthogonal_distances1[outlier_indices], 
+       pch = 19, col = "red")
+
+# Add cutoff lines for outliers
+abline(v = score_cutoff, col = "red", lty = 2)  # Score distance threshold
+abline(h = orthogonal_cutoff, col = "red", lty = 2)  # Orthogonal distance threshold
+
+# Add legend
+legend("topright", legend = c("Outlier Thresholds"), col = "red", lty = 2)
+
+# Add labels to the outliers
+text(score_distances1[outlier_indices], orthogonal_distances1[outlier_indices], 
+     labels = names(score_distances1)[outlier_indices], 
+     pos = 4, cex = 0.8, col = "red")  # pos = 4 means label to the right
+
+```
+
+
+```{r}
+# Create a histogram of orthogonal distances
+hist(orthogonal_distances1, breaks = 30, 
+     main = "Orthogonal Distance Distribution", 
+     xlab = "Orthogonal Distance", 
+     col = "lightblue")
+
+# Add a vertical line to show the threshold for outliers
+# abline(v = 4.7e-12, col = "red", lwd = 2)
+abline(v = rpca1@cutoff.od, col = "red", lwd = 2)
+
+# RESULTS: "208_N56", "297_LC018", "232_1463" ,"262_N50"
+```
+
+```{r}
+# Extract eigenvalues from the PCA result
+eigenvalues <- rpca1@eigenvalues
+# Calculate proportion of variance explained
+variance_explained <- eigenvalues / sum(eigenvalues)
+
+# Calculate cumulative variance explained
+cumulative_variance <- cumsum(variance_explained)
+
+# Create a data frame
+scree_data <- data.frame(
+  Principal_Component = 1:length(eigenvalues),
+  Variance_Explained = variance_explained,
+  Cumulative_Variance = cumulative_variance
+)
+
+# Scree plot (Eigenvalues)
+plot(scree_data$Principal_Component, eigenvalues, type = "b",
+     xlab = "Principal Component", ylab = "Eigenvalue",
+     main = "Scree Plot")
+
+# Scree plot using ggplot2
+ggplot(scree_data, aes(x = Principal_Component, y = Variance_Explained)) +
+  geom_point() +
+  geom_line() +
+  xlab("Principal Component") +
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  theme_minimal()
+
+# Cumulative variance plot
+ggplot(scree_data, aes(x = Principal_Component, y = Cumulative_Variance)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "red") +  # 80% variance line
+  xlab("Principal Component") +
+  ylab("Cumulative Variance Explained") +
+  ggtitle("Cumulative Variance Explained Plot") +
+  theme_minimal()
+```
+
+#### List of samples that out outside of the thresholds  for scores and ortho
+```{r}
+
+threshold_scores1 <- rpca1@cutoff.sd          # Score distance threshold
+threshold_ortho1<-rpca1@cutoff.od
+# threshold_ortho1<-4.2e-12
+
+# Identify samples above the threshold
+outlier_both1 <- which(score_distances1 > threshold_scores1 | orthogonal_distances1 > threshold_ortho1)
+outlier_score1 <- which(score_distances1 > threshold_scores1)
+outlier_ortho1<- which(orthogonal_distances1 > threshold_ortho1)
+
+# Create a data.frame with sample IDs and corresponding threshold scores
+# outliers_both1 <- data.frame(
+#   sample_id = outlier_both1,
+#   threshold_both1 = pmax(
+#     outlier_both1[outlier_score1] - outlier_both1
+#     
+#   )
+# )
+outliers_score1 <- data.frame(
+  sample_id = outlier_score1,
+  threshold_score = pmax(
+    score_distances1[outlier_score1] - threshold_scores1
+  )
+)
+outliers_ortho1 <- data.frame(
+  sample_id = outlier_ortho1,
+  threshold_ortho1 = pmax(
+    score_distances1[outlier_ortho1] - threshold_ortho1
+  )
+)
+
+# outliers_both1$ofav_gene<- rownames(outliers_both1)
+outliers_score1$ofav_gene<- rownames(outliers_score1)
+outliers_ortho1$ofav_gene<- rownames(outliers_ortho1)
+# Print the results
+cat("Threshold for score distances:", threshold_scores1,"\n")
+
+cat("Threshold for orthogonal distances:", threshold_ortho1,"\n")
+
+# cat("Samples above both threshold (potential outliers):", outliers_both1$ofav_gene)
+#"224_663","208_N52","208_N56","267_713","297_LC018","317_LC085","312_LC088","297_LC127","277_679","282_689","287_693","237_1332","252_3342","232_N46","232_N60"
+cat("Samples above the score threshold (potential outliers):", outliers_score1$ofav_gene)
+
+cat("Samples above the orthogonal threshold (potential outliers):", outliers_ortho1$ofav_gene)
+
+
+```
+### Samples consider outliers for rubust PCA analysis
+
+```{r}
+samples.to.be.excluded.rpca <- c()
+samples.to.be.excluded.rpca.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.rpca) 
+
+ggplot(samples.to.be.excluded.rpca.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ Grouping) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with rpca",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+```{r}
+
+# Assuming you have a vector of sample names corresponding to each row in pca_scores
+sample_names <- rownames(pca_scores)  # or another vector of your sample names
+
+# Plot the 3D PCA plot
+plot3d(pca_scores[, 1], pca_scores[, 2], pca_scores[, 3], 
+       col = "blue", size = 5, 
+       xlab = "PC1", ylab = "PC2", zlab = "PC3", 
+       main = "3D PCA Plot")
+
+# Add text labels for all the samples
+text3d(pca_scores[, 1], pca_scores[, 2], pca_scores[, 3], 
+       texts = sample_names, 
+       cex = 0.6, col = "black")  # Adjust cex to make text smaller if needed
+
+
+```
+
+### 3D PCA plot to visualized outliers
+```{r}
+pca_scores <- rpca1@scores
+
+outliers_3dpca<- c("224_N53","317_LC085","327_MC002","247_1280","252_3342","322_LC016","282_689","232_N50","272_N58","232_N46","297_LC127","307_MC014","140_LC077","224_663","208_N52","208_713","192_1280","212_N48")
+
+# Verify that pca_scores has rownames
+if (is.null(rownames(pca_scores))) {
+  stop("The 'pca_scores' object must have row names corresponding to sample names.")
+}
+
+# Check for valid outliers in pca_scores
+valid_outliers <- outliers_3dpca[outliers_3dpca %in% rownames(pca_scores)]
+
+# Plot the 3D PCA plot
+plot3d(pca_scores[, 1], pca_scores[, 2], pca_scores[, 3],
+       col = "blue", size = 5,
+       xlab = "PC1", ylab = "PC2", zlab = "PC3",
+       main = "3D PCA Plot")
+
+# Highlight outliers in red
+if (length(valid_outliers) > 0) {
+  # Extract coordinates for the valid outliers
+  outlier_coords <- pca_scores[valid_outliers, , drop = FALSE]
+  
+  # Add red points for outliers
+  points3d(outlier_coords[, 1], outlier_coords[, 2], outlier_coords[, 3],
+           col = "red", size = 8)
+  
+  # Label outliers by their sample names
+  text3d(outlier_coords[, 1], 
+         outlier_coords[, 2], 
+         outlier_coords[, 3], 
+         texts = rownames(outlier_coords), 
+         cex = 1, col = "black")
+} else {
+  cat("No matching outliers found in the row names of pca_scores.\n")
+}
+
+
+
+```
+
+### Samples consider outliers for 3dPCA from rpca analysis
+
+```{r}
+samples.to.be.excluded.3dpca <- c("224_N53","317_LC085","327_MC002","247_1280","252_3342","322_LC016","282_689","232_N50","272_N58","232_N46","297_LC127","307_MC014","140_LC077","224_663","208_N52","208_713","192_1280","212_N48")
+samples.to.be.excluded.3dpca.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.3dpca) 
+
+ggplot(samples.to.be.excluded.3dpca.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with rpca",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+
+### PLOTS: Log Counts per sample
+```{r}
+
+outliers_log10<- c("208_N56","297_LC018","317_LC085","312_LC088","297_LC127","247_1280","237_1332","252_3342","232_N60","272_N58","277_679","282_689")
+# Step 2: Create a color vector to highlight outliers in red, others in gray
+sample_names <- colnames(count_data.reads)
+highlight_colors <- ifelse(sample_names %in% outliers_log10, "red", "gray")
+
+
+# Step 3: Create the boxplot for log-transformed counts
+par(mgp = c(3, 0.5, 0))  # Adjust margin placement
+boxplot(log10(counts(dds_dist, normalized = TRUE) + 1),
+        main = "Log10 Counts per Sample",
+        ylab = "Log10(Counts + 1)",
+        las = 2,  # Rotate labels to vertical
+        cex.axis = 0.8,  # Adjust font size
+        col = highlight_colors)  # Highlight outlier samples in red
+
+
+```
+
+### Samples consider outliers for 3dPCA from rpca analysis
+
+```{r}
+samples.to.be.excluded.log10 <- c("208_N56","297_LC018","317_LC085","312_LC088","297_LC127","247_1280","237_1332","252_3342","232_N60","272_N58","277_679","282_689")
+samples.to.be.excluded.log10.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.log10) 
+
+ggplot(samples.to.be.excluded.log10.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with rpca",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+```{r}
+sampleDists_dist <- dist(t(assay(rlog_dds_dist)), method = "manhattan")
+
+# Heatmap of distances
+
+sampleDistMatrix_dist <- as.matrix(sampleDists_dist)
+# Extract treatment names from colData
+treatment_names_dist <- dds_dist@colData$season    # Replace 'treatment' with the correct column name in your colData
+sample_names_dist <- dds_dist@colData$Sample_ID
+region_names_dist <- dds_dist@colData$Region
+location_names_dist <- dds_dist@colData$Location
+
+
+# Ensure the treatment names are in the same order as the samples in rlog_dds_idgenes
+# rownames(sampleDistMatrix_dist) <- treatment_names_dist
+# colnames(sampleDistMatrix_dist) <-treatment_names_dist
+
+# rownames(sampleDistMatrix_dist) <- region_names_dist
+# colnames(sampleDistMatrix_dist) <-region_names_dist
+
+# rownames(sampleDistMatrix_dist) <- location_names_dist
+# colnames(sampleDistMatrix_dist) <-location_names_dist
+
+rownames(sampleDistMatrix_dist) <- location_names_dist
+colnames(sampleDistMatrix_dist) <-sample_names_dist
+
+# rownames(sampleDistMatrix_dist) <- colnames(rlog_dds_dist)
+# colnames(sampleDistMatrix_dist) <-colnames(rlog_dds_dist)
+
+winter<- colData.reads %>% filter(season == "winter") %>% select(Sample_ID,season)
+winter<- winter$Sample_ID
+season_vector <- ifelse(colnames(rlog_dds_dist) %in% winter, "winter", "fall")
+
+# Create an annotation dataframe for rows (you can do the same for columns)
+annotation_row <- data.frame(winter = season_vector)
+annotation_col <- data.frame(winter = season_vector)
+
+
+# Create the heatmap object
+Heatmap(sampleDistMatrix_dist,
+        name = "Sample Distance",  # Name for the heatmap legend
+        cluster_rows = TRUE,
+        cluster_columns = TRUE,
+        bottom_annotation = HeatmapAnnotation(df = annotation_col,
+                                              col = list(winter = c("winter" = "blue", "fall" = "red"))),
+        row_names_gp = gpar(fontsize = 4),
+        column_names_side = "bottom") # Place column labels at the bottom
+```
+```{r}
+# Convert the distance object to a vector
+distance_vector <- as.vector(sampleDistMatrix_dist)
+
+# Optionally, inspect the first few distances
+head(distance_vector)
+
+# Plot a histogram of pairwise distances
+hist(distance_vector,
+     breaks = 20,  # Number of bins
+     main = "Distribution of Pairwise Sample Distances",
+     xlab = "Manhattan Distance",
+     col = "skyblue",
+     border = "white")
+
+
+# Create a data frame for plotting
+distance_df <- data.frame(Distance = distance_vector)
+# Combined Histogram and Density Plot
+ggplot(distance_df, aes(x = Distance)) +
+  geom_histogram(aes(y = ..density..), binwidth = 50, fill = "lightblue", color = "white", alpha = 0.7) +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Histogram and Density of Pairwise Sample Distances",
+       x = "Manhattan Distance",
+       y = "Density") +
+  theme_minimal()
+# Density plot using ggplot2
+ggplot(distance_df, aes(x = Distance)) +
+  geom_density(fill = "orange", alpha = 0.5) +
+  labs(title = "Density of Pairwise Sample Distances",
+       x = "Manhattan Distance",
+       y = "Density") +
+  theme_minimal()
+
+# Plot a boxplot of pairwise distances
+boxplot(distance_vector,
+        main = "Boxplot of Pairwise Sample Distances",
+        ylab = "Manhattan Distance",
+        col = "lightgreen",
+        horizontal = TRUE)
+
+
+
+
+
+
+```
+
+
+### Creating density plots for samples distant within and between groups
+```{r}
+# Extract sample names from rlog-transformed data
+sample_names <- colnames(assay(rlog_dds_dist))
+sample_names <- as.character(sample_names)
+# Ensure colData is ordered according to sample_names
+colData <- colData.reads[sample_names, ]
+
+# Extract sample names from the distance matrix
+distance_samples <- attr(sampleDistMatrix_dist, "Labels")
+
+# Confirm that the sample names match across all data structures
+if (!all(sample_names == distance_samples)) {
+  stop("Sample names do not match between rlog data and distance matrix.")
+}
+
+# Extract sample labels (group assignments)
+sample_labels <- colData.reads$SCTLD_RNA_Region_season
+
+# Assign sample names to the labels for clarity
+names(sample_labels) <- sample_names
+
+# View the sample labels
+# print(sample_labels)
+
+
+# Alternatively, generate pairwise combinations of sample names
+pairwise_samples <- combn(sample_names, 2)
+
+# Initialize a vector to store categories
+distance_category <- character(ncol(pairwise_samples))
+
+# Loop over each pair to assign categories
+distance_category <- apply(pairwise_samples, 2, function(samples) {
+  sample1 <- samples[1]
+  sample2 <- samples[2]
+  
+  label1 <- sample_labels[sample1]
+  label2 <- sample_labels[sample2]
+  
+  if (label1 == label2) {
+    "Within Group"
+  } else {
+    "Between Groups"
+  }
+})
+
+# Extract lower triangle distances, excluding diagonal
+distance_vector_n1 <- sampleDistMatrix_dist[lower.tri(sampleDistMatrix_dist)]
+length(distance_vector) 
+
+
+# Create a data frame with distances and categories
+distance_df_annotated <- data.frame(
+  Distance = distance_vector_n1,
+  Category = distance_category
+)
+
+
+
+
+
+ggplot(distance_df_annotated, aes(x = Distance, fill = Category)) +
+  geom_density(alpha = 0.5, adjust = 1) +
+  labs(
+    title = "Distribution of Pairwise Sample Distances",
+    x = "Distance",
+    y = "Density",
+    fill = "Category"
+  ) +
+  theme_minimal() +
+  # scale_x_continuous(
+  #   breaks = seq(0, 200, by = 1000),
+  #   minor_breaks = seq(0, 200, by = 500),
+  #   limits = c(0, 200)
+  # ) +
+  # geom_vline(
+  #   xintercept = 150,
+  #   color = "red",
+  #   linetype = "dashed",
+  #   size = 1
+  # ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+```
+
+```{r}
+
+# Step 1: Combine data into a single data frame
+distance_df_full <- data.frame(
+  Sample1 = pairwise_samples[1,],
+  Sample2 = pairwise_samples[2,],
+  Distance = distance_vector_n1,
+  Category = distance_category,
+  stringsAsFactors = FALSE
+)
+
+# Step 2: Filter for within-group pairs with distance > 16000
+high_distance_within_group <- subset(
+  distance_df_full,
+  Category == "Within Group" & Distance > 15000
+)
+
+# Alternatively, using dplyr
+# library(dplyr)
+# high_distance_within_group <- distance_df_full %>%
+#   filter(Category == "Within Group", Distance > 16000)
+
+# Step 3: Inspect the results
+print(high_distance_within_group)
+
+# Optional Step 4: Summarize and visualize
+# Number of pairs
+num_high_distance_pairs <- nrow(high_distance_within_group)
+cat("Number of within-group pairs with distance > 15000:", num_high_distance_pairs, "\n")
+
+# Bar plot
+
+ggplot(high_distance_within_group, aes(x = interaction(Sample1, Sample2), y = Distance)) +
+  geom_bar(stat = "identity", fill = "tomato") +
+  labs(title = "Within-Group Sample Pairs with Distance > 16000",
+       x = "Sample Pair",
+       y = "Distance") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Step 5: Save the results
+# write.csv(high_distance_within_group, "High_Distance_Within_Group_Pairs.csv", row.names = FALSE)
+
+```
+
+
+
+```{r}
+# Define a vector of sample names you want to highlight
+highlight_samples <- c("208_N56","212_699","322_LC016","297_LC018")  # Replace with the actual sample names
+
+# Create a binary vector indicating if the sample should be highlighted
+highlight_vector <- ifelse(rownames(sampleDistMatrix_dist) %in% highlight_samples, "highlight", "normal")
+
+# Create an annotation dataframe for rows (you can do the same for columns)
+annotation_row <- data.frame(Highlight = highlight_vector)
+annotation_col <- data.frame(Highlight = highlight_vector)
+
+# Create the heatmap
+pheatmap(sampleDistMatrix_dist, 
+         clustering_distance_rows = sampleDists_dist, 
+         clustering_distance_cols = sampleDists_dist, 
+         main = "Sample Distance Heatmap raw", 
+         fontsize_row = 4, 
+         annotation_col = annotation_col, 
+         annotation_colors = list(Highlight = c("highlight" = "red", "normal" = "white")))
+
+```
+
+
+
+
+### Samples consider outliers for 3dPCA from rpca analysis
+
+```{r}
+samples.to.be.excluded.manh <- c("208_N56","212_699","322_LC016","297_LC018")
+samples.to.be.excluded.manh.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.manh) 
+
+ggplot(samples.to.be.excluded.manh.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers found with Manhanttan distance analysis",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+
+
+### Samples consider outliers in 3 or more visualization analysis
+```{r}
+samples.to.be.excluded.comb <- c("322_LC016","208_N52","224_663","212_699","267_713","287_693","208_N56","297_LC018")
+#"140_LC077","208_N52","252_3342","267_713","282_689","287_693","297_LC127","317_LC085",	"322_LC016","208_N56","224_663","297_LC018"
+samples.to.be.excluded.comb.meta <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(row.names(.) %in% samples.to.be.excluded.comb) 
+```
+
+```{r}
+
+
+ggplot(samples.to.be.excluded.comb.meta, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Region") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+
+
+### Eliminating outliers found with rPCA from count data : "count_data_all_e_nolow_nohigh"
+- also adding samples that showed as outliers in herrarchical cluster
+```{r}
+
+count_data.comb <- count_data.reads[,!(colnames(count_data.reads) %in% samples.to.be.excluded.comb)] #10908,
+
+colData.comb <- colData.reads  %>% #column_to_rownames(var = 'Sample_ID') %>% 
+  filter(!row.names(.) %in% samples.to.be.excluded.comb) #98
+```
+
+```{r}
+all(rownames(colData.comb) %in% colnames(count_data.comb))
+all(rownames(colData.comb) == colnames(count_data.comb))
+```
+
+
+
+### Detecting samples outliers based on hierarchical clustering and PCA of raw reads
+```{r}
+# detect outlier samples - hierarchical clustering-method 1
+
+expression<- t(count_data.comb)
+
+# png("results/normalization/htree_QC_nooutliers.png", width=30, height=8, units = "in", res = 300)
+
+htree_4M <- hclust(dist(expression), method = "average")
+# Create a dendrogram object from your hclust object
+dend <- as.dendrogram(htree_4M)
+
+# Define the samples to highlight: extreme sample distance
+# highlight_samples <- c("156_LC018","208_N56","232_1463","262_N50")
+
+# Samples from clusters with in cut off lower than 6 samples
+highlight_samples <- colData.reads %>% filter( season == "winter") %>% select(Sample_ID)
+highlight_samples <- highlight_samples$Sample_ID
+
+# highlight_samples <- c("148_MC019","212_753","192_1280","212_N48","212_699","140_LC077" ,"216_3446" , "184_1463" , "224_663","267_713","208_713","196_1452","287_693","257_741" )
+#"148_MC019","212_753","192_1280","212_N48","212_699","140_LC077" ,"216_3446" , "184_1463" , "224_663","267_713","208_713","196_1452","287_693","257_741" 
+# Match the labels to highlight
+labels_colors(dend) <- ifelse(labels(dend) %in% highlight_samples, "blue", "black")
+
+# Plot the dendrogram with highlighted labels
+par(mar = c(5, 4, 2, 2))  # Adjust margins for better label placement
+plot(dend, 
+     main = "Sample clustering to after outlier detection", 
+     sub = "", 
+     xlab = "", 
+     cex.main = 2,
+     cex.lab = 1,
+     cex = 0.2)
+
+# Add a line for the cut-off
+abline(h = 150000, col = "red")
+
+
+# dev.off()
+
+# pca-method 2
+
+# png("results/normalization/pca_QC_4M_nooutliers.png", width=8, height=8, units = "in", res = 300)
+pca_4M <- prcomp(expression)
+pca_4M.dat <- pca_4M$x
+
+pca_4M.var <- pca_4M$sdev^2
+pca_4M.var.percent <- round(pca_4M.var/sum(pca_4M.var)*100, digits = 2)
+
+pca_4M.dat <- as.data.frame(pca_4M.dat)
+
+ggplot(pca_4M.dat, aes(PC1, PC2)) +
+  geom_point() +
+  geom_text(label = rownames(pca_4M.dat)) +
+  labs(x = paste0('PC1: ', pca_4M.var.percent[1], ' %'),
+       y = paste0('PC2: ', pca_4M.var.percent[2], ' %'))
+# dev.off()
+```
+
+## Eliminating genes outliers based on Relative log expression
+
+### Modelling data with DESEq2 with full model : ~ SCTLD_RNA_month
+```{r}
+dds_idgenes <- DESeqDataSetFromMatrix(countData = count_data.comb, 
+                                   colData = colData.comb, 
+                                   design = ~ SCTLD_RNA_Region_season)
+
+# if (file.exists("cache/dds_idgenes.rds")) {
+#   dds_idgenes <- read_rds("cache/dds_idgenes.rds")
+# } else {
+dds_idgenes <- DESeq(dds_idgenes, parallel = TRUE)
+#   write_rds(dds_idgenes,"cache/dds_idgenes.rds")
+# }
+
+
+rlog_dds_idgenes <- rlog(dds_idgenes, blind = FALSE)
+
+vst_dds_idgenes<- vst(dds_idgenes, blind = FALSE)
+
+beep(2)
+```
+```{r}
+
+
+ggplot(colData.comb, aes(x = season, fill = Location)) +
+  geom_bar(position = "dodge") +
+  geom_text(stat = 'count', aes(label = ..count..),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  facet_wrap(~ SCTLD_RNA) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_light() +
+  labs(title = "Sample Distribution of outliers",
+       subtitle = "Across Seasons, Regions, and SCTLD_RNA Status",
+       x = "Season",
+       y = "Number of Samples",
+       fill = "Location") +
+  theme(
+    panel.grid = element_blank(),            # Remove all grid lines
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+## RESULT: there is no clear pattter of gruping o fsamples, so low read coount must be an sequencing artifact
+```
+### PLOT: PCA DESeq2 plot with rlog transformation
+```{r}
+pcaData_idgenes = plotPCA(vst_dds_idgenes, intgroup=c("colnames",'SCTLD_RNA',"sample_month","Location","time_point","Region","ID","Sample_ID","season","SP_region"),
+returnData=TRUE)
+# pcaData_idgenes$label <- ifelse(pcaData_idgenes$Sample_ID %in% outliers, 
+#                                  pcaData_idgenes$Sample_ID, 
+#                                  NA)
+percentVar_idgenes = round(100 * attr(pcaData_idgenes, "percentVar"))
+
+# png("results/3_All_4M_Norm/PCA_dds_null.filtered2_rlog.png", width=8, height=6, units = "in", res = 300)
+ggplot(pcaData_idgenes, aes(PC1, PC2, colour = SP_region, shape = SCTLD_RNA)) +
+geom_point(size = 4) + theme_bw() +
+geom_text_repel(aes(label = Sample_ID), nudge_x = -1, nudge_y = 0.2, size = 4) +
+ggtitle("Principal Component Analysis ~ season, dds_idgenes", subtitle = "rlog") +
+xlab(paste0("PC1: ",percentVar_idgenes[1],"% variance")) +
+ylab(paste0("PC2: ",percentVar_idgenes[2],"% variance")) +
+# Custom scales for finer axes
+scale_x_continuous(breaks = seq(-80, 80, by = 5), limits = c(-10, 25)) +
+scale_y_continuous(breaks = seq(-50, 30, by = 5), limits = c(-25, 30))
+# dev.off()
+
+```
+### Calculate RLE from rlog
+```{r}
+# Calculate RLE (subtract gene-wise median)
+rle_matrix_idgenes <- apply(assay(rlog_dds_idgenes), 1, function(x) x - median(x))
+rle_matrix_idgenes <- t(rle_matrix_idgenes)  # Transpose back to match original dimensions
+
+# Convert matrix to long format
+rle_long_idgenes <- as.data.frame(rle_matrix_idgenes)
+rle_long_idgenes$Gene <- rownames(rle_matrix_idgenes)
+rle_long_idgenes <- pivot_longer(rle_long_idgenes, cols = -Gene, names_to = "Sample", values_to = "RLE")
+
+```
+
+### PLOT: Boxplot of RLE per sample for gene outlier detection
+```{r}
+ggplot(rle_long_idgenes, aes(x = Sample, y = RLE)) +
+  geom_boxplot() +  # Hide outliers for clarity
+  theme_minimal() +
+  labs(title = "RLE Plot using rlog-transformed Data",
+       x = "Samples",
+       y = "Relative Log Expression (RLE)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+### Find genes where the maximum RLE value across samples is greater than 20 
+NOTE: 20 was selected by visual inspection of the boxplot 
+```{r}
+high_rle_genes <- rownames(rle_matrix_idgenes)[apply(rle_matrix_idgenes, 1, function(x) max(abs(x))) > 15]
+# Print the genes with high RLE
+print(high_rle_genes) #"QW917_000473","QW917_002183" ,"QW917_005425" ,"QW917_005933", "QW917_016428" ,"QW917_016434"
+```
+```{r}
+beep(10)
+```
+
+### PLOT: Gene expression of rlog data of the outlier genes 
+```{r}
+rlog_data_idgenes<- assay(rlog_dds_idgenes)
+# Specify the genes of interest
+genes_of_interest_idgenes <- c("QW917_002183","QW917_005933","QW917_016428","QW917_030365","QW917_030899") 
+
+# Subset the rlog data for the genes of interest
+subset_rlog_idgenes <- rlog_data_idgenes[genes_of_interest_idgenes, ]
+
+# Convert to a tidy format for ggplot
+tidy_data_idgenes <- as.data.frame(subset_rlog_idgenes)
+tidy_data_idgenes$Gene <- rownames(subset_rlog_idgenes)
+tidy_data_idgenes <- tidyr::pivot_longer(
+  tidy_data_idgenes, 
+  cols = -Gene, 
+  names_to = "Sample", 
+  values_to = "Expression"
+)
+
+# Add sample metadata (if available)
+metadata_idgenes <- as.data.frame(colData(dds_idgenes))
+metadata_idgenes$Sample <- rownames(metadata_idgenes)
+
+# Merge tidy_data with metadata
+plot_data_idgenes <- merge(tidy_data_idgenes, metadata_idgenes, by = "Sample")
+
+# Plot using ggplot2
+ggplot(plot_data_idgenes, aes(x = Sample, y = Expression, color = Gene)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(
+    title = "Gene Expression per Sample",
+    x = "Sample",
+    y = "Expression (rlog transformed)"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Plot using ggplot2 with boxplot
+ggplot(plot_data_idgenes, aes(x = SCTLD_RNA_SP, y = Expression, fill = SCTLD_RNA_SP)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.8) +  # Add individual points
+  facet_wrap(~ Gene, scales = "free_y") +  # One panel per gene
+  theme_minimal() +
+  labs(
+    title = "Gene Expression per Condition",
+    x = "Condition",
+    y = "Expression (rlog transformed)"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 10),  # Adjust facet label size
+    legend.position = "none"  # Hide legend
+  )
+```
+
+### Eliminating genes outliers found with rle and by visual inspection of their expression 
+```{r}
+
+genes.to.be.excluded <- c("QW917_002183","QW917_005933","QW917_016428","QW917_030365","QW917_030899")
+
+count_data.rle <- count_data.comb[!(rownames(count_data.comb) %in% genes.to.be.excluded),] #10908
+
+# NO GENES TO ELIMINATE
+```
+
+
+```{r}
+all(rownames(colData.comb) %in% colnames(count_data.rle))
+all(rownames(colData.comb) == colnames(count_data.rle))
+```
+### Identify genes with high Cook's distance
+```{r}
+dds_cook <- DESeqDataSetFromMatrix(countData = count_data.rle, 
+                                   colData = colData.comb, 
+                                   design = ~ SCTLD_RNA_Region_season)
+dds_cook <- DESeq(dds_cook, parallel = TRUE)
+cooks_distances_cook <- assays(dds_cook)[["cooks"]]
+# threshold <- quantile(cooks_distances_null, probs = 0.999)
+high_cooks_cook <- rowSums(cooks_distances_cook > 1) > 0
+outlier_genes_cook <- rownames(dds_cook)[high_cooks_cook]
+
+beep(2)
+```
+
+### Filter out outliers genes  (if necessary)
+```{r}
+data.counts<-count_data.comb[!(rownames(count_data.comb) %in% outlier_genes_cook),] #10293
+```
+
+### making sure the rownames and column names identical for count data and the sample data
+```{r}
+all(rownames(colData.comb) %in% colnames(data.counts))
+all(rownames(colData.comb) == colnames(data.counts))
+```
+
+
+
+### Modelling data with DESEq2 with full model : ~ SCTLD_RNA_month
+```{r}
+dds_null <- DESeqDataSetFromMatrix(countData = data.counts, 
+                                   colData = colData.comb, 
+                                   design = ~ 1)
+
+# if (file.exists("cache/dds_null.rds")) {
+#   dds_null <- read_rds("cache/dds_null.rds")
+# } else {
+dds_null <- DESeq(dds_null, parallel = TRUE)
+#   write_rds(dds_null,"cache/dds_null.rds")
+# }
+
+
+rlog_dds_null <- rlog(dds_null, blind = FALSE)
+
+vst_dds_null<- vst(dds_null, blind = FALSE)
+
+beep(2)
+```
+
+```{r}
+sampleDists_dist2 <- dist(t(assay(rlog_dds_null)))
+
+# Heatmap of distances
+
+sampleDistMatrix_dist2 <- as.matrix(sampleDists_dist2)
+# Extract treatment names from colData
+treatment_names_dist2 <- dds_null@colData$season    # Replace 'treatment' with the correct column name in your colData
+treatment_names_location <- dds_null@colData$Location    # Replace 'treatment' with the correct column name in your colData
+
+# Ensure the treatment names are in the same order as the samples in rlog_dds_idgenes
+rownames(sampleDistMatrix_dist2) <- treatment_names_dist2
+colnames(sampleDistMatrix_dist2) <-colnames(rlog_dds_null)
+
+# Create the heatmap
+pheatmap(sampleDistMatrix_dist2, 
+         clustering_distance_rows = sampleDists_dist2, 
+         clustering_distance_cols = sampleDists_dist2,
+         main = "Sample Distance Heatmap",fontsize_row = 4)
+```
+
+
+```{r}
+# pca-method 2
+expression.3<- t(data.counts)
+# png("results/normalization/pca_QC_4M_nooutliers.png", width=8, height=8, units = "in", res = 300)
+pca_4M.3 <- prcomp(expression.3)
+pca_4M.dat.3 <- pca_4M.3$x
+  
+pca_4M.var.3 <- pca_4M.3$sdev^2
+pca_4M.var.percent.3 <- round(pca_4M.var.3/sum(pca_4M.var.3)*100, digits = 2)
+
+pca_4M.dat.3 <- as.data.frame(pca_4M.dat.3)
+pca_4M.dat.3$season <- colData.comb$season # Add the treatment info
+pca_4M.dat.3$SCTLD_RNA <- colData.comb$SCTLD_RNA # Add the treatment info
+pca_4M.dat.3$SCTLD_RNA_month <- colData.comb$SCTLD_RNA_month # Add the treatment info
+pca_4M.dat.3$Region <- colData.comb$Region # Add the treatment info
+pca_4M.dat.3$SCTLD_RNA_SP <- colData.comb$SCTLD_RNA_SP # Add the treatment info
+
+
+ggplot(pca_4M.dat.3, aes(PC1, PC2, color = season, shape = Region)) +
+  geom_point(size = 2) +  # Adjust point size
+  geom_text(aes(label = rownames(pca_4M.dat.3)), vjust = -1, size = 2) +  # Adjust label position and size
+  labs(
+    x = paste0('PC1: ', pca_4M.var.percent.3[1], '%'),
+    y = paste0('PC2: ', pca_4M.var.percent.3[2], '%'),
+    title = "PCA Plot"
+  ) +
+  theme_minimal() +  # Optional: clean theme
+  theme(legend.position = "right")  # Adjust legend position
+# dev.off()
+```
+
+
+```{r}
+pcaData_null.rlog = plotPCA(rlog_dds_null, intgroup=c("colnames",'SCTLD_RNA',"sample_month","Location","time_point","Region","ID","Sample_ID","season"),
+returnData=TRUE)
+# Add a new column to pcaData_null.rlog indicating whether the sample is an outlier
+
+percentVar_null.rlog = round(100 * attr(pcaData_null.rlog, "percentVar"))
+
+# Generate the PCA plot
+ggplot(pcaData_null.rlog, aes(PC1, PC2, colour = season, shape = SCTLD_RNA)) +
+  geom_point(size = 2) + 
+  theme_bw() +
+  geom_text_repel(aes(label = Sample_ID),  # Use the 'label' column for text labels
+                  nudge_x = -1, nudge_y = 0.2, size = 3, max.overlaps = 100) +
+  ggtitle("Principal Component Analysis ~ 1, dds_null.rlog", subtitle = "rlog") +
+  xlab(paste0("PC1: ", percentVar_null.rlog[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar_null.rlog[2], "% variance"))
+
+
+pcaData_null.vst = plotPCA(vst_dds_null, intgroup=c("colnames",'SCTLD_RNA',"sample_month","Location","time_point","Region","ID","Sample_ID","season"),
+returnData=TRUE)
+# Add a new column to pcaData_null.vst indicating whether the sample is an outlier
+
+percentVar_null.vst = round(100 * attr(pcaData_null.vst, "percentVar"))
+
+# Generate the PCA plot
+ggplot(pcaData_null.vst, aes(PC1, PC2, colour = season, shape = SCTLD_RNA)) +
+  geom_point(size = 2) + 
+  theme_bw() +
+  geom_text_repel(aes(label = Sample_ID),  # Use the 'label' column for text labels
+                  nudge_x = -1, nudge_y = 0.2, size = 3, max.overlaps = 100) +
+  ggtitle("Principal Component Analysis ~ 1, dds_null.vst", subtitle = "rlog") +
+  xlab(paste0("PC1: ", percentVar_null.vst[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar_null.vst[2], "% variance"))
+```
+
+
+
+
+```{r}
+# Calculate RLE (subtract gene-wise median)
+rle_matrix_filt <- apply(assay(rlog_dds_null), 1, function(x) x - median(x))
+rle_matrix_filt <- t(rle_matrix_filt)  # Transpose back to match original dimensions
+
+# Convert matrix to long format
+rle_long_filt <- as.data.frame(rle_matrix_filt)
+rle_long_filt$Gene <- rownames(rle_matrix_filt)
+rle_long_filt <- pivot_longer(rle_long_filt, cols = -Gene, names_to = "Sample", values_to = "RLE")
+
+```
+
+```{r}
+ggplot(rle_long_filt, aes(x = Sample, y = RLE)) +
+  geom_boxplot(outlier.shape = NA) +  # Hide outliers for clarity
+  theme_minimal() +
+  labs(title = "RLE Plot using rlog-transformed Data after filtering",
+       x = "Samples",
+       y = "Relative Log Expression (RLE)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+### PLOT: Cooks distance plotting for null model
+```{r}
+
+# png("results/normalization/cookdistance_dds_null.png", width=15, height=10, units = "in", res = 300)
+boxplot_dds_4M<-boxplot(log10(assays(dds_null)[["cooks"]]), names = colData.comb$colnames,cex.axis = 0.7, las = 3,range=2,main="Cook's distance ~ 1 , dds null ")
+# dev.off()
+
+maxCooks_null <- apply(assays(dds_null)[["cooks"]], 1, max)
+mcols(dds_null)$maxCooks_null <- apply(assays(dds_null)[["cooks"]], 1, max)
+plot(mcols(dds_null)$baseMean, mcols(dds_null)$maxCooks_null)
+
+# this requires you not filter or order the 'res' object
+res_null<- results(dds_null)
+stopifnot(all.equal(rownames(dds_null), rownames(res_null)))
+plot(res_null$log2FoldChange, mcols(dds_null)$maxCooks_null)
+
+res_null_df<- as.data.frame(res_null)
+ggplot(res_null_df, aes(x= baseMean, y=log2FoldChange)) + geom_point()
+
+```
+
+
+### making sure the rownames and column names identical for count data and the sample data
+```{r}
+colData_4M<- colData.comb
+all(rownames(colData_4M) %in% colnames(data.counts))
+all(rownames(colData_4M) == colnames(data.counts))
+```
+
+
+### Distribution of samples after eliminating sample period 1 and North ECA samples
+```{r}
+ggplot(colData_4M, aes(SCTLD_RNA)) +
+ 
+  geom_bar(position = "dodge", stat = "count") + 
+  
+  geom_text(stat = "count", aes(label = after_stat(count))) +
+  
+  facet_wrap(~ Region + sample_period) 
+```
+
+```{r}
+for_plot<- group_by(colData_4M,y="SCTLD_RNA_region")
+
+ggplot(for_plot, aes(season)) +
+ 
+  geom_bar(position = "dodge", stat = "count") + 
+  
+  geom_text(stat = "count", aes(label = after_stat(count))) +
+  
+  facet_wrap(  SCTLD_RNA_region ~ ID) 
+```
+
+```{r}
+boxplot(count_data.reads, main = "Gene Expression Distribution", 
+        outline = TRUE, las = 2, col = "lightblue", 
+        xlab = "Genes", ylab = "Expression")
+
+boxplot(count_data.comb, main = "Gene Expression Distribution", 
+        outline = TRUE, las = 2, col = "lightblue", 
+        xlab = "Genes", ylab = "Expression")
+
+boxplot(data.counts, main = "Gene Expression Distribution", 
+        outline = TRUE, las = 2, col = "lightblue", 
+        xlab = "Genes", ylab = "Expression")
+```
+
+
+
+## Saving new counts and sample data from 4M 
+```{r}
+# write_rds(data.counts,"cache/data_counts_4M.rds")
+# write_rds(colData_4M,"cache/colData_4M.rds")
+# write_rds(rlog_dds_null,"cache/rlog_dds_null.rds")
+# write_rds(vst_dds_null,"cache/vst_dds_nulll.rds")
+
+```
+
+
+
+
+
+
+
+
