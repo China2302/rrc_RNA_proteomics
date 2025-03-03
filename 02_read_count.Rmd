@@ -39,8 +39,8 @@ reads_mapped<- reads_mapped %>%
   
                dplyr::rename(Sample_ID = Sample)
 
-samples_selected_4M<- reads_mapped %>% filter(million_uniq >= 4000000  & million_uniq < 10000000) 
-samples_selected_4M<- samples_selected_4M %>% filter(percent_uniq >= 55 & percent_uniq <= 80) #163 samples
+samples_selected_4M<- reads_mapped %>% filter(million_uniq >= 1000000  & million_uniq < 10000000) 
+samples_selected_4M<- samples_selected_4M %>% filter(percent_uniq >= 50 & percent_uniq <= 80) #163 samples
 
 ```
 

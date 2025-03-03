@@ -1,5 +1,5 @@
 ---
-title: "04_DGE_4M_month"
+title: "04_DGE_prot"
 author: "Natalia Andrade Rodriguez"
 date: "2023-09-12"
 output: html_document
@@ -47,20 +47,20 @@ all(rownames(colData_4M) == colnames(data.counts))
 This model will will allow us to compare affected colonies per sample months ('sep_unaffected vs winter_unaffected' etc). Here we can compare  the regions independently as ECA correspond to fallust and winterch and Lower Keys correspond to fallember and winterruary.
 
 ```{r}
-dds_sctld.reg.season<- DESeqDataSetFromMatrix(countData = data.counts, 
+dds_grouping<- DESeqDataSetFromMatrix(countData = data.counts, 
                             
                                 colData = colData_4M, 
  
-                                design = ~ 0 + SCTLD_RNA_Region_season )
+                                design = ~ 0 + Grouping )
 ```
 
 #### Fitting models
 ```{r}
-if (file.exists("cache/dds_sctld.reg.season.rds")) {
-  dds_sctld.reg.season <- read_rds("cache/dds_sctld.reg.season.rds")
+if (file.exists("cache/dds_grouping.rds")) {
+  dds_grouping <- read_rds("cache/dds_grouping.rds")
 } else {
- dds_sctld.reg.season <- DESeq(dds_sctld.reg.season, parallel = TRUE)
-  write_rds(dds_sctld.reg.season,"cache/dds_sctld.reg.season.rds")
+ dds_grouping <- DESeq(dds_grouping, parallel = TRUE)
+  write_rds(dds_grouping,"cache/dds_grouping.rds")
 }
 
 beep()
@@ -68,7 +68,7 @@ beep()
 
 #### Transform reads with variance Stabilizing Transformation
 ```{r}
-vst_dds_sctld.reg.season = vst(dds_sctld.reg.season, blind=FALSE)
+vst_dds_grouping = vst(dds_grouping, blind=FALSE)
 
 beep()
 ```
@@ -76,11 +76,11 @@ beep()
 #### Transform reads with rlog transfroamtion 
 ```{r}
 
-if (file.exists("cache/rlog_dds_sctld.reg.season.rds")) {
-  rlog_dds_sctld.reg.season <- read_rds("cache/rlog_dds_sctld.reg.season.rds")
+if (file.exists("cache/rlog_dds_grouping.rds")) {
+  rlog_dds_grouping <- read_rds("cache/rlog_dds_grouping.rds")
 } else {
-rlog_dds_sctld.reg.season <- rlog(dds_sctld.reg.season, blind=FALSE)
-  write_rds(rlog_dds_sctld.reg.season,"cache/rlog_dds_sctld.reg.season.rds")
+rlog_dds_grouping <- rlog(dds_grouping, blind=FALSE)
+  write_rds(rlog_dds_grouping,"cache/rlog_dds_grouping.rds")
 }
 
 
@@ -92,11 +92,11 @@ beep()
 #### Cook’s distance plot
 ```{r}
 # ~ SCTLD_RNA_Region_season
-# png("results/5_All_4M_DEG/cookdistance_dds_sctld.reg.season.png", width=30, height=8, units = "in", res = 300)
-boxplot_dds_sctld.reg.season<-boxplot(log10(assays(dds_sctld.reg.season)[["cooks"]]+1), names = colData_4M$colnames,cex.axis = 0.7, las = 3,range=2,main="Cook's distance ~ SCTLD_RNA_Region_season")
+# png("results/5_All_4M_DEG/cookdistance_dds_grouping.png", width=30, height=8, units = "in", res = 300)
+boxplot_dds_grouping<-boxplot(log10(assays(dds_grouping)[["cooks"]]+1), names = colData_4M$colnames,cex.axis = 0.7, las = 3,range=2,main="Cook's distance ~ SCTLD_RNA_Region_season")
 # dev.off()
 
-boxplot_dds_sctld.reg.season<-boxplot(log10(assays(dds_sctld.reg.season)[["cooks"]]), names = colData_4M$colnames,cex.axis = 0.7, las = 3,range=2,main="Cook's distance ~ SCTLD_RNA_Region_season")
+boxplot_dds_grouping<-boxplot(log10(assays(dds_grouping)[["cooks"]]), names = colData_4M$colnames,cex.axis = 0.7, las = 3,range=2,main="Cook's distance ~ SCTLD_RNA_Region_season")
 beep()
 ```
 
@@ -108,27 +108,27 @@ beep()
 
 # ~ SCTLD_RNA_Region_season
 
-# png("results/5_All_4M_DEG/Dispersionplot_dds_sctld.reg.season.png", width=15, height=6, units = "in", res = 300)
-plotDispEsts(dds_sctld.reg.season, main="Dispersion plot dds_sctld.reg.season ~ SCTLD_RNA_Region_season")
+# png("results/5_All_4M_DEG/Dispersionplot_dds_grouping.png", width=15, height=6, units = "in", res = 300)
+plotDispEsts(dds_grouping, main="Dispersion plot dds_grouping ~ SCTLD_RNA_Region_season")
 # dev.off()
 
 
 beep()
 ```
 
-#### PCA DESeq2 plot with vst transformation dds_sctld.reg.season
+#### PCA DESeq2 plot with vst transformation dds_grouping
 ```{r}
-#PCA dds_sctld.reg.season:~ SCTLD_RNA_Region_season
+#PCA dds_grouping:~ SCTLD_RNA_Region_season
 
-pcaData = plotPCA(vst_dds_sctld.reg.season, intgroup=c("colnames",'SCTLD_RNA',"Region","sample_month","time_point","Location", "sample_day","percent_uniq", "season"), 
+pcaData = plotPCA(vst_dds_grouping, intgroup=c("colnames",'SCTLD_RNA',"Region","sample_month","time_point","Location", "sample_day","percent_uniq", "season","Grouping"), 
 returnData=TRUE)
 percentVar = round(100 * attr(pcaData, "percentVar"))
 
-# png("results/5_All_4M_DEG/PCA_dds_sctld.reg.season_vst.png", width=10, height=8, units = "in", res = 300)
-ggplot(pcaData, aes(PC1, PC2, colour = SCTLD_RNA, shape =season )) + 
+# png("results/5_All_4M_DEG/PCA_dds_grouping_vst.png", width=10, height=8, units = "in", res = 300)
+ggplot(pcaData, aes(PC1, PC2, colour = Grouping, shape =season )) + 
 geom_point(size = 2) + theme_bw() + 
 geom_text_repel(aes(label = Region), nudge_x = -1, nudge_y = 0.2, size = 3) +
-ggtitle("Principal Component Analysis vst", subtitle = "~ SCTLD_RNA_Region_season") +
+ggtitle("Principal Component Analysis vst", subtitle = "~ Grouping") +
 xlab(paste0("PC1: ",percentVar[1],"% variance")) +
 ylab(paste0("PC2: ",percentVar[2],"% variance"))
 # dev.off()
@@ -140,15 +140,15 @@ beep()
 ```{r}
 #PCA dds:~ ~ SCTLD_RNA_Region_season
 
-pcaData_rlog = plotPCA(rlog_dds_sctld.reg.season, intgroup=c("colnames",'SCTLD_RNA',"Region","sample_month","time_point","Location"), 
+pcaData_rlog = plotPCA(rlog_dds_grouping, intgroup=c("colnames",'SCTLD_RNA',"Region","sample_month","time_point","Location","Grouping"), 
 returnData=TRUE)
 percentVar_rlog = round(100 * attr(pcaData_rlog, "percentVar"))
 
-# png("results/5_All_4M_DEG/PCA_dds_sctld.reg.season_rlog.png", width=10, height=8, units = "in", res = 300)
-ggplot(pcaData_rlog, aes(PC1, PC2, colour = Region, shape = SCTLD_RNA)) +
+# png("results/5_All_4M_DEG/PCA_dds_grouping_rlog.png", width=10, height=8, units = "in", res = 300)
+ggplot(pcaData_rlog, aes(PC1, PC2, colour = Location, shape = Grouping)) +
 geom_point(size = 2) + theme_bw() +
 geom_text_repel(aes(label = sample_month), nudge_x = -1, nudge_y = 0.2, size = 3) +
-ggtitle("Principal Component Analysis rlog ", subtitle = "~ SCTLD_RNA_Region_season") +
+ggtitle("Principal Component Analysis rlog ", subtitle = "~ Grouping") +
 xlab(paste0("PC1: ",percentVar_rlog[1],"% variance")) +
 ylab(paste0("PC2: ",percentVar_rlog[2],"% variance"))
 
@@ -159,8 +159,8 @@ ylab(paste0("PC2: ",percentVar_rlog[2],"% variance"))
 #### Checking sumwintery results for ~ SCTLD_RNA_Region_season to see if there is any concerns about outliers
 ```{r}
 
-#Results dds_sctld.reg.season:~ SCTLD_RNA_Region_season
-res_sctld.reg.season<- results(dds_sctld.reg.season)
+#Results dds_grouping:~ SCTLD_RNA_Region_season
+res_grouping<- results(dds_grouping)
 
 
 ```
@@ -168,9 +168,9 @@ res_sctld.reg.season<- results(dds_sctld.reg.season)
 
 ## Getting list of differencialy expressed genes (DEG) per relevant contrast
 
-- Factor names dds_sctld.reg.season:~ SCTLD_RNA_Region_season
+- Factor names dds_grouping:~ SCTLD_RNA_Region_season
 ```{r}
-resultsNames(dds_sctld.reg.season)
+resultsNames(dds_grouping)
 ```
 
 ### Susceptability effect of gene expression per season and region
@@ -178,26 +178,30 @@ resultsNames(dds_sctld.reg.season)
 #### Contrast for Lower Keys ~ SCTLD_RNA_Region_season
 ##### DEG btw SCTLD_affected vs SCTLD_ unaffected in fall --> Fall
 ```{r}
-res_lower_affected_fall_vs_unaffected_fall<- results(dds_sctld.reg.season,contrast =
+res_active_vs_never<- results(dds_grouping,contrast =
                                         
-                              c("SCTLD_RNA_Region_season",'SCTLD_affected_Lower_fall',"SCTLD_unaffected_Lower_fall"))
+                              c("Grouping",'active_disease',"never_diseased"))
 
-resOrdered_lower_affected_fall_vs_unaffected_fall<- as.data.frame(
+resOrdered_active_vs_never<- as.data.frame(
                
-                                 res_lower_affected_fall_vs_unaffected_fall[order(res_lower_affected_fall_vs_unaffected_fall$padj),])
+                                 res_active_vs_never[order(res_active_vs_never$padj),])
                 
-DEG_lower_fall_aff_vs_unaff <-resOrdered_lower_affected_fall_vs_unaffected_fall %>%  
+DEG_active_vs_never <-resOrdered_active_vs_never %>%  
   
-                                mutate(ofav_gene = rownames(resOrdered_lower_affected_fall_vs_unaffected_fall)) %>%
+                                mutate(ofav_gene = rownames(resOrdered_active_vs_never)) %>%
    
                                 filter(padj<0.1)
 
+DEG_active_vs_never_anno<- DEG_active_vs_never %>% left_join(anno, by="ofav_gene")
+```
 
+```{r}
+write_csv(DEG_active_vs_never_anno, "data/DEG_active_vs_never.csv")
 ```
 
 ##### DEG btw SCTLD_affected vs SCTLD_ unaffected in winter --> winter
 ```{r}
-res_lower_affected_winter_vs_unaffected_winter<- results(dds_sctld.reg.season,contrast =
+res_lower_affected_winter_vs_unaffected_winter<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_affected_Lower_winter',"SCTLD_unaffected_Lower_winter"))
 
@@ -219,7 +223,7 @@ DEG_lower_winter_aff_vs_unaff <-resOrdered_lower_affected_winter_vs_unaffected_w
 
 ##### DEG btw SCTLD_affected vs SCTLD_ unaffected in fall --> fall
 ```{r}
-res_ECA_affected_fall_vs_unaffected_fall<- results(dds_sctld.reg.season,contrast =
+res_ECA_affected_fall_vs_unaffected_fall<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_affected_ECA_fall',"SCTLD_unaffected_ECA_fall"))
 
@@ -238,7 +242,7 @@ DEG_ECA_fall_aff_vs_unaff <-resOrdered_ECA_affected_fall_vs_unaffected_fall %>%
 
 ##### DEG btw SCTLD_affected vs SCTLD_ unaffected in winter --> winter
 ```{r}
-res_ECA_affected_winter_vs_unaffected_winter<- results(dds_sctld.reg.season,contrast =
+res_ECA_affected_winter_vs_unaffected_winter<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_affected_ECA_winter',"SCTLD_unaffected_ECA_winter"))
 
@@ -284,9 +288,9 @@ ECA_winter_log.padj<- resOrdered_ECA_affected_winter_vs_unaffected_winter %>%
                   
 # Lower affected vs unaffected in fall
 
-lower_fall_log.padj<- resOrdered_lower_affected_fall_vs_unaffected_fall %>%
+lower_fall_log.padj<- resOrdered_active_vs_never %>%
   
-                  mutate(ofav_gene = rownames(resOrdered_lower_affected_fall_vs_unaffected_fall)) %>% 
+                  mutate(ofav_gene = rownames(resOrdered_active_vs_never)) %>% 
   
                   mutate(log_lower_fall = log2FoldChange) %>% 
   
@@ -419,7 +423,7 @@ sig_genes.affvsunaff_winter_lower<- sig_suscept_season_region_w %>% filter(sig_l
 
 ids_winter_ECA<- sig_genes.affvsunaff_winter_ECA$ofav_gene
 
-count_winter_ECA_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_winter_ECA),]
+count_winter_ECA_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_winter_ECA),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_winter_ECA_vst))
@@ -431,7 +435,7 @@ count_winter_ECA_vst_df<-as.data.frame( assay(count_winter_ECA_vst))
 
 ids_winter_lower<- sig_genes.affvsunaff_winter_lower$ofav_gene
 
-count_winter_lower_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_winter_lower),]
+count_winter_lower_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_winter_lower),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_winter_lower_vst))
@@ -443,7 +447,7 @@ count_winter_lower_vst_df<-as.data.frame( assay(count_winter_lower_vst))
 
 ids_region_2seasons<- sig_suscept_season_region$ofav_gene
 
-count_region_2seasons_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_region_2seasons),]
+count_region_2seasons_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_region_2seasons),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_region_2seasons_vst))
@@ -903,14 +907,14 @@ Heatmap(mat_winter_region.scaled,
 
 #### Contrast for Lower Keys ~ SCTLD_RNA_Region_season
 ```{r}
-resultsNames(dds_sctld.reg.season)
+resultsNames(dds_grouping)
 
 ```
 
 ##### DEG btw SCTLD_affected in fall vs SCTLD_affected in winter--> DEG Lower affected Winter vs Fall
 
 ```{r}
-res_lower_affected_WvsF<- results(dds_sctld.reg.season,contrast =
+res_lower_affected_WvsF<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_affected_Lower_winter',"SCTLD_affected_Lower_fall"))
 
@@ -929,7 +933,7 @@ DEG_lower_aff_WvsF <-resOrdered_lower_affected_WvsF %>%
 
 ##### DEG btw SCTLD_unaffected in fall vs SCTLD_unaffected in winter--> DEG Lower unaffected Winter vs Fall
 ```{r}
-res_lower_unaffected_WvsF<- results(dds_sctld.reg.season,contrast =
+res_lower_unaffected_WvsF<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_unaffected_Lower_winter',"SCTLD_unaffected_Lower_fall"))
 
@@ -950,7 +954,7 @@ DEG_lower_unaff_WvsF <-resOrdered_lower_unaffected_WvsF %>%
 
 ##### DEG btw SCTLD_affected in fall vs SCTLD_affected in winter--> DEG ECA affected Winter vs Fall
 ```{r}
-res_ECA_affected_WvsF<- results(dds_sctld.reg.season,contrast =
+res_ECA_affected_WvsF<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_affected_ECA_winter',"SCTLD_affected_ECA_fall"))
 
@@ -970,7 +974,7 @@ DEG_ECA_aff_WvsF <-resOrdered_ECA_affected_WvsF %>%
 
 ##### DEG btw SCTLD_unaffected in fall vs SCTLD_unaffected in winter--> DEG ECA unaffected Winter vs Fall
 ```{r}
-res_ECA_unaffected_WvsF<- results(dds_sctld.reg.season,contrast =
+res_ECA_unaffected_WvsF<- results(dds_grouping,contrast =
                                         
                               c("SCTLD_RNA_Region_season",'SCTLD_unaffected_ECA_winter',"SCTLD_unaffected_ECA_fall"))
 
@@ -1275,7 +1279,7 @@ DEG.com.com_WvsF<- region_WvsF_anno %>% filter(com.com_sig_WvsF == TRUE)
 
 ids_regions.aff<- DEG.all.aff_WvsF$ofav_gene
 
-count_regions.aff.WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_regions.aff),]
+count_regions.aff.WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_regions.aff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_regions.aff.WvsF_vst))
@@ -1286,7 +1290,7 @@ all(rownames(colData_4M) == colnames(count_regions.aff.WvsF_vst))
 
 ids_com.region.aff<- DEG.com.aff_WvsF$ofav_gene
 
-count_com.region.aff.WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_com.region.aff),]
+count_com.region.aff.WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_com.region.aff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_com.region.aff.WvsF_vst))
@@ -1296,7 +1300,7 @@ all(rownames(colData_4M) == colnames(count_com.region.aff.WvsF_vst))
 
 ids_com.region.unaff<- DEG.com.unaff_WvsF$ofav_gene
 
-count_com.region.unaff.WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_com.region.unaff),]
+count_com.region.unaff.WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_com.region.unaff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_com.region.unaff.WvsF_vst))
@@ -1307,7 +1311,7 @@ all(rownames(colData_4M) == colnames(count_com.region.unaff.WvsF_vst))
 
 ids_uniq.region.unaff<- DEG.uniq.unaff_WvsF$ofav_gene
 
-count_uniq.region.unaff.WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_uniq.region.unaff),]
+count_uniq.region.unaff.WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_uniq.region.unaff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_uniq.region.unaff.WvsF_vst))
@@ -1317,7 +1321,7 @@ all(rownames(colData_4M) == colnames(count_uniq.region.unaff.WvsF_vst))
 
 ids_uniq.region.aff<- DEG.uniq.aff_WvsF$ofav_gene
 
-count_uniq.region.aff.WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_uniq.region.aff),]
+count_uniq.region.aff.WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_uniq.region.aff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_uniq.region.aff.WvsF_vst))
@@ -1328,7 +1332,7 @@ all(rownames(colData_4M) == colnames(count_uniq.region.aff.WvsF_vst))
 
 ids_all.com_WvsF<- DEG.all.com_WvsF$ofav_gene
 
-count_all.com_WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_all.com_WvsF),]
+count_all.com_WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_all.com_WvsF),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_all.com_WvsF_vst))
@@ -1339,7 +1343,7 @@ all(rownames(colData_4M) == colnames(count_all.com_WvsF_vst))
 
 ids_com.com_WvsF<- DEG.com.com_WvsF$ofav_gene
 
-count_com.com_WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_com.com_WvsF),]
+count_com.com_WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_com.com_WvsF),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_com.com_WvsF_vst))
@@ -1350,7 +1354,7 @@ all(rownames(colData_4M) == colnames(count_com.com_WvsF_vst))
 
 ids_all.sig_WvsF<- DEG.all_WvsF$ofav_gene
 
-count_all.sig_WvsF_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_all.sig_WvsF),]
+count_all.sig_WvsF_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_all.sig_WvsF),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_all.sig_WvsF_vst))
@@ -1800,7 +1804,7 @@ dim(all_contrast_DEG)
 
 ids_all_contrast_DEG<- all_contrast_DEG$ofav_gene
 
-count_all_contrast_DEG_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_all_contrast_DEG),]
+count_all_contrast_DEG_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_all_contrast_DEG),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_all_contrast_DEG_vst))
@@ -1813,14 +1817,14 @@ all(rownames(colData_4M) == colnames(count_all_contrast_DEG_vst))
 
 #### Contrast combining factors
 ```{r}
-resultsNames(dds_sctld.reg.season)
+resultsNames(dds_grouping)
 
 ```
 
 ##### DEG btw SCTLD_affected in fall vs SCTLD_unaffected in fall--> for both regions
 
 ```{r}
-res_both_affvsunaff_fall<- results(dds_sctld.reg.season, contrast = list(
+res_both_affvsunaff_fall<- results(dds_grouping, contrast = list(
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_fall"),
     c("SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_fall")
   ),
@@ -1840,7 +1844,7 @@ DEG_both_affvsunaff_fall <-resOrdered_both_affvsunaff_fall %>%
 ```
 
 ```{r}
-res_both_affvsunaff_winter<- results(dds_sctld.reg.season, contrast = list(
+res_both_affvsunaff_winter<- results(dds_grouping, contrast = list(
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_winter"),
     c("SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_winter")
   ),
@@ -1858,7 +1862,7 @@ DEG_both_affvsunaff_winter <-resOrdered_both_affvsunaff_winter %>%
 ```
 
 ```{r}
-res_both_season<- results(dds_sctld.reg.season, contrast = list(
+res_both_season<- results(dds_grouping, contrast = list(
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_winter","SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_winter"),
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_fall","SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_fall")
   ),
@@ -1877,7 +1881,7 @@ DEG_both_season <-resOrdered_both_season %>%
 
 
 ```{r}
-res_both_season_aff<- results(dds_sctld.reg.season, contrast = list(
+res_both_season_aff<- results(dds_grouping, contrast = list(
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_winter"),
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_fall")
   ),
@@ -1895,7 +1899,7 @@ DEG_both_season_aff <-resOrdered_both_season_aff %>%
 ```
 
 ```{r}
-res_both_season_unaff<- results(dds_sctld.reg.season, contrast = 
+res_both_season_unaff<- results(dds_grouping, contrast = 
     c("SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_winter"),
     c("SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_fall", "SCTLD_RNA_Region_seasonSCTLD_unaffected_Lower_fall"), 
     listValues =c(0.5,-0.5) )
@@ -1927,12 +1931,12 @@ contrast_vector <- c(rep(1/length(unaffected_conditions), length(unaffected_cond
                      rep(-1/length(affected_conditions), length(affected_conditions)))
 
 # Perform the contrast
-res_affvsunaff <- results(dds_sctld.reg.season, contrast = list(c(unaffected_conditions, affected_conditions)), 
+res_affvsunaff <- results(dds_grouping, contrast = list(c(unaffected_conditions, affected_conditions)), 
                listValues = c(0.5,-0.5))
 ```
 
 ```{r}
-res_affvsunaff<- results(dds_sctld.reg.season, contrast = 
+res_affvsunaff<- results(dds_grouping, contrast = 
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_winter",
       "SCTLD_RNA_Region_seasonSCTLD_affected_Lower_winter",
       "SCTLD_RNA_Region_seasonSCTLD_affected_ECA_fall", 
@@ -1956,7 +1960,7 @@ DEG_affvsunaff <-resOrdered_both_season %>%
 
 
 ```{r}
-res_affvsunaff_ECA<- results(dds_sctld.reg.season, contrast = list(
+res_affvsunaff_ECA<- results(dds_grouping, contrast = list(
     c("SCTLD_RNA_Region_seasonSCTLD_affected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_affected_ECA_fall"),
     c("SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_winter", "SCTLD_RNA_Region_seasonSCTLD_unaffected_ECA_fall")
   ),
@@ -1978,7 +1982,7 @@ DEG_affvsunaff_ECA <-resOrdered_affvsunaff_ECA %>%
 
 ids_affvsunaff<- DEG_affvsunaff_ECA$ofav_gene
 
-count_affvsunaff_vst <- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% ids_affvsunaff),]
+count_affvsunaff_vst <- vst_dds_grouping[(rownames(vst_dds_grouping) %in% ids_affvsunaff),]
 
 # making the rownames and column names identical
 all(rownames(colData_4M) %in% colnames(count_affvsunaff_vst))
@@ -2154,7 +2158,7 @@ Heatmap(mat_com.com.WvsF.scaled,
 ```{r}
 genes_uniq_unaff<- uniq_unaff_month_region$ofav_gene
 
-count_data_uniq_unaff<- vst_dds_sctld.reg.season[(rownames(vst_dds_sctld.reg.season) %in% genes_uniq_unaff),]
+count_data_uniq_unaff<- vst_dds_grouping[(rownames(vst_dds_grouping) %in% genes_uniq_unaff),]
 
 #head(sample_data_Lower)
 #names(sample_data_Lower)
